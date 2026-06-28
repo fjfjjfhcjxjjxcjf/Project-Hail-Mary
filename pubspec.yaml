@@ -1,0 +1,43 @@
+name: doclingo
+description: AI-powered document translator - translate books, documents and files into natural languages while preserving formatting.
+publish_to: 'none'
+version: 2.0.0+2
+
+environment:
+  sdk: ^3.12.0
+  flutter: '>=3.44.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  go_router: ^14.8.1
+  freezed_annotation: ^2.4.6
+  json_annotation: ^4.9.0
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.5
+  file_picker: ^8.3.7
+  dio: ^5.7.0
+  google_fonts: ^6.2.1
+  uuid: ^4.5.1
+  logger: ^2.5.0
+  dio_smart_retry: ^6.0.0
+  crypto: ^3.0.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  build_runner: ^2.4.14
+  freezed: ^2.5.8
+  json_serializable: ^6.9.2
+  riverpod_generator: ^2.6.2
+  mockito: ^5.4.5
+  hive_generator: ^2.0.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/fonts/

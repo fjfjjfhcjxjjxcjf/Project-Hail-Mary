@@ -1,0 +1,8 @@
+# Release Signing Configuration
+# Copy this to key.properties and fill in your values.
+# NEVER commit this file to version control!
+
+storePassword=<your-store-password>
+keyPassword=<your-key-password>
+keyAlias=<your-key-alias>
+storeFile=<path-to-your-keystore-file>

@@ -1,0 +1,9 @@
+# Local properties template for DocLingo
+# Copy this to local.properties and update paths for your system.
+# On desktop, `flutter pub get` will auto-generate this file.
+
+# sdk.dir=/path/to/Android/Sdk
+# flutter.sdk=/path/to/flutter
+# flutter.buildMode=debug
+# flutter.versionName=2.0.0
+# flutter.versionCode=2

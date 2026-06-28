@@ -1,0 +1,47 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.vscode/
+
+# Generated code (*.freezed.dart and *.g.dart are committed for CI builds)
+# Uncomment the following lines if you prefer to generate on CI:
+# **/*.freezed.dart
+# **/*.g.dart
+
+# Android
+android/local.properties
+android/.gradle/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/key.properties
+*.jks
+*.keystore
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Flutter/ephemeral/
+ios/Runner.xcworkspace/xcshareddata/
+
+# Platform build outputs
+/build/
+/.gradle/
+
+# Misc
+.DS_Store
+*.log
+*.tmp
+.env
+.env.*
+
+# Termux-specific (should never be committed)
+android/local.properties.termux
