@@ -13,7 +13,7 @@ dependencies:
   flutter_riverpod: ^2.6.1
   riverpod_annotation: ^2.6.1
   go_router: ^14.8.1
-  freezed_annotation: ^2.4.6
+  freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
   hive_flutter: ^1.1.0
   path_provider: ^2.1.5
