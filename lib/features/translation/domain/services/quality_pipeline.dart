@@ -113,7 +113,7 @@ Return JSON: {"score": <0-100>, "feedback": "<feedback>", "issues": [{"message":
       );
 
       final data = response.data;
-      if (data == null) return (QualityCheck(type: checkType, score: 0), []);
+      if (data == null) return (QualityCheck(type: checkType, score: 0), <QualityIssue>[]);
 
       final content = (data['choices'] as List?)?.firstOrNull?['message']?['content'] as String? ?? '';
       String jsonStr = content;
@@ -145,7 +145,7 @@ Return JSON: {"score": <0-100>, "feedback": "<feedback>", "issues": [{"message":
       );
     } catch (e) {
       _logger.e('Quality check error: $e');
-      return (QualityCheck(type: checkType, score: 0, feedback: 'Check failed: $e'), []);
+      return (QualityCheck(type: checkType, score: 0, feedback: 'Check failed: $e'), <QualityIssue>[]);
     } finally {
       client.dispose();
     }
