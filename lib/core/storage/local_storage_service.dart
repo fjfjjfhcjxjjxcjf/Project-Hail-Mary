@@ -1,5 +1,4 @@
 import 'package:hive_flutter/hive_flutter.dart';
-import '../constants/app_constants.dart';
 import '../../features/translation/domain/entities/ai_provider.dart';
 import '../../features/translation/domain/entities/translation_job.dart';
 import '../../features/translation/domain/entities/glossary.dart';
