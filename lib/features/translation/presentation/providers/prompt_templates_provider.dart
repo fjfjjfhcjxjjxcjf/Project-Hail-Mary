@@ -18,7 +18,7 @@ class PromptTemplatesNotifier extends StateNotifier<List<PromptTemplate>> {
 
   void _seedDefaults() {
     final defaults = [
-      const PromptTemplate(
+      PromptTemplate(
         id: 'default-novel',
         name: 'Novel Translation',
         description: 'Standard novel translation prompt',
@@ -26,8 +26,9 @@ class PromptTemplatesNotifier extends StateNotifier<List<PromptTemplate>> {
         profileId: 'novel',
         isBuiltIn: true,
         category: 'Literature',
+        createdAt: DateTime.now(),
       ),
-      const PromptTemplate(
+      PromptTemplate(
         id: 'default-technical',
         name: 'Technical Documentation',
         description: 'Technical docs with code preservation',
@@ -35,8 +36,9 @@ class PromptTemplatesNotifier extends StateNotifier<List<PromptTemplate>> {
         profileId: 'technical',
         isBuiltIn: true,
         category: 'Technical',
+        createdAt: DateTime.now(),
       ),
-      const PromptTemplate(
+      PromptTemplate(
         id: 'default-academic',
         name: 'Academic Paper',
         description: 'Academic/scientific paper translation',
@@ -44,6 +46,7 @@ class PromptTemplatesNotifier extends StateNotifier<List<PromptTemplate>> {
         profileId: 'academic',
         isBuiltIn: true,
         category: 'Academic',
+        createdAt: DateTime.now(),
       ),
     ];
     state = defaults;
