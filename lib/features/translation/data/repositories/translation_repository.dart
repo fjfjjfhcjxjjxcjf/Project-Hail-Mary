@@ -4,6 +4,7 @@ import '../../domain/entities/translation_job.dart';
 import '../../domain/entities/ai_provider.dart';
 import '../../domain/entities/glossary.dart';
 import '../sources/translation_data_source.dart';
+import '../../../../core/debug/debug_log.dart';
 
 class TranslationRepository {
   final TranslationDataSource _dataSource;
@@ -21,6 +22,7 @@ class TranslationRepository {
     String previousContext = '',
     CancelToken? cancelToken,
   }) {
+    dlog('REPO', 'translateChunk ENTRY — provider=${provider.name}, text=${text.length} chars');
     return _dataSource.translateChunk(
       text: text,
       sourceLanguage: sourceLanguage,
@@ -43,6 +45,7 @@ class TranslationRepository {
     String customPrompt = '',
     CancelToken? cancelToken,
   }) {
+    dlog('REPO', 'translateChunkStream ENTRY');
     return _dataSource.translateChunkStream(
       text: text,
       sourceLanguage: sourceLanguage,
@@ -59,6 +62,7 @@ class TranslationRepository {
     required AiProvider provider,
     CancelToken? cancelToken,
   }) {
+    dlog('REPO', 'extractTextFromImage ENTRY');
     return _dataSource.extractTextFromImage(
       base64Image: base64Image,
       provider: provider,
@@ -67,7 +71,11 @@ class TranslationRepository {
   }
 
   List<String> chunkText(String text, int chunkSize) {
-    if (text.length <= chunkSize) return [text];
+    dlog('REPO', 'chunkText ENTRY — text=${text.length} chars, chunkSize=$chunkSize');
+    if (text.length <= chunkSize) {
+      dlog('REPO', '  single chunk');
+      return [text];
+    }
 
     final chunks = <String>[];
     final paragraphs = text.split(RegExp(r'\n\s*\n'));
@@ -79,7 +87,6 @@ class TranslationRepository {
         currentChunk = StringBuffer();
       }
       if (paragraph.length > chunkSize) {
-        // Split long paragraphs by sentences
         final sentences = paragraph.split(RegExp(r'(?<=[.!?])\s+'));
         for (final sentence in sentences) {
           if (currentChunk.length + sentence.length + 1 > chunkSize && currentChunk.isNotEmpty) {
@@ -99,6 +106,7 @@ class TranslationRepository {
       chunks.add(currentChunk.toString().trim());
     }
 
+    dlog('REPO', '  produced ${chunks.length} chunk(s)');
     return chunks;
   }
 }

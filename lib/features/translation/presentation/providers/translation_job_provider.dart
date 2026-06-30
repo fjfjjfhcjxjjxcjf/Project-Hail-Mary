@@ -42,230 +42,226 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
     int chunkSize = 2000,
     double temperature = 0.3,
   }) async {
-    dlog('JOB', '=== startTranslation() called ===');
-    dlog('JOB', '  text length: ${text.length}');
-    dlog('JOB', '  source: $sourceLanguage, target: $targetLanguage');
-    dlog('JOB', '  profile: ${profile.name}');
-    dlog('JOB', '  providerId param: $providerId');
+    dlog('JOB', '=== startTranslation() ENTRY ===');
 
-    _cancelled = false;
-    _cancelToken = CancelToken();
-    dlog('JOB', '  CancelToken created: ${_cancelToken.hashCode}');
+    // Wrap the ENTIRE method body in a top-level try-catch so that
+    // no exception can ever escape silently into an unhandled Future.
+    try {
+      dlog('JOB', '  text: ${text.length} chars');
+      dlog('JOB', '  source=$sourceLanguage target=$targetLanguage');
+      dlog('JOB', '  profile=${profile.name} providerId=$providerId');
 
-    // Read active providers on-demand (not watched) to avoid
-    // provider recreation mid-translation.
-    final activeProviders = _ref.read(activeProvidersProvider);
-    dlog('JOB', '  active providers: ${activeProviders.length}');
-    for (final p in activeProviders) {
-      dlog('JOB', '    - ${p.id}: ${p.name} (${p.type.name}), '
-          'model=${p.selectedModel}, keyLen=${p.apiKey.length}');
-    }
+      _cancelled = false;
+      _cancelToken = CancelToken();
 
-    // Pick provider
-    AiProvider? provider;
-    if (providerId != null) {
-      provider = activeProviders.where((p) => p.id == providerId).firstOrNull;
-      dlog('JOB', '  picked by id "$providerId": ${provider?.name ?? "NOT FOUND"}');
-    }
-    provider ??= activeProviders.isNotEmpty ? activeProviders.first : null;
+      // ── Step 1: Read providers ──
+      dlog('JOB', '  [step 1] reading activeProvidersProvider...');
+      final activeProviders = _ref.read(activeProvidersProvider);
+      dlog('JOB', '  [step 1] got ${activeProviders.length} active providers');
 
-    if (provider == null) {
-      dlog('JOB', '  FAIL: no provider available');
-      state = TranslationJob(
+      // Pick provider
+      AiProvider? provider;
+      if (providerId != null) {
+        provider = activeProviders.where((p) => p.id == providerId).firstOrNull;
+      }
+      provider ??= activeProviders.isNotEmpty ? activeProviders.first : null;
+
+      if (provider == null) {
+        dlog('JOB', '  ABORT: no provider');
+        _setFailed('No active AI provider configured. Please add an API key in Settings.');
+        return;
+      }
+
+      dlog('JOB', '  provider: ${provider.name} (${provider.type.name})');
+      dlog('JOB', '  baseUrl: ${provider.baseUrl}');
+      dlog('JOB', '  model: ${provider.selectedModel}');
+      dlog('JOB', '  apiKey set: ${provider.apiKey.isNotEmpty}');
+
+      // ── Step 2: Chunk text ──
+      dlog('JOB', '  [step 2] chunking text (chunkSize=$chunkSize)...');
+      final chunks = _repository.chunkText(text, chunkSize);
+      dlog('JOB', '  [step 2] got ${chunks.length} chunk(s)');
+
+      final translatedChunks = <TranslatedChunk>[
+        for (int i = 0; i < chunks.length; i++)
+          TranslatedChunk(id: _uuid.v4(), index: i, originalText: chunks[i]),
+      ];
+
+      // ── Step 3: Create job ──
+      dlog('JOB', '  [step 3] creating job...');
+      final job = TranslationJob(
         id: _uuid.v4(),
         documentId: '',
         documentName: 'Text Input',
         sourceLanguage: sourceLanguage,
         targetLanguage: targetLanguage,
         profile: profile,
-        status: TranslationStatus.failed,
-        errorMessage: 'No active AI provider configured. Please add an API key in Settings.',
+        customPrompt: customPrompt,
+        providerId: provider.id,
+        status: TranslationStatus.inProgress,
         createdAt: DateTime.now(),
+        chunks: translatedChunks,
+        useGlossary: glossary.isNotEmpty,
       );
-      return;
-    }
+      dlog('JOB', '  [step 3] job created: ${job.id}');
 
-    dlog('JOB', '  USING provider: ${provider.name} (${provider.type.name})');
-    dlog('JOB', '  baseUrl: ${provider.baseUrl}');
-    dlog('JOB', '  model: ${provider.selectedModel}');
+      // ── Step 4: Set state ──
+      dlog('JOB', '  [step 4] setting state = inProgress...');
+      state = job;
+      dlog('JOB', '  [step 4] state set OK');
 
-    // Chunk the text
-    final chunks = _repository.chunkText(text, chunkSize);
-    dlog('JOB', '  chunks: ${chunks.length}');
-    for (int i = 0; i < chunks.length; i++) {
-      dlog('JOB', '    chunk[$i]: ${chunks[i].length} chars');
-    }
-
-    final translatedChunks = <TranslatedChunk>[
-      for (int i = 0; i < chunks.length; i++)
-        TranslatedChunk(id: _uuid.v4(), index: i, originalText: chunks[i]),
-    ];
-
-    final job = TranslationJob(
-      id: _uuid.v4(),
-      documentId: '',
-      documentName: 'Text Input',
-      sourceLanguage: sourceLanguage,
-      targetLanguage: targetLanguage,
-      profile: profile,
-      customPrompt: customPrompt,
-      providerId: provider.id,
-      status: TranslationStatus.inProgress,
-      createdAt: DateTime.now(),
-      chunks: translatedChunks,
-      useGlossary: glossary.isNotEmpty,
-    );
-
-    dlog('JOB', '  job created, id: ${job.id}');
-    dlog('JOB', '  setting state to inProgress...');
-
-    state = job;
-    dlog('JOB', '  state set. Saving to storage...');
-
-    await _storage.saveJob(job);
-    dlog('JOB', '  job saved. Starting chunk loop...');
-
-    _logger.i('Translation started: ${chunks.length} chunk(s), '
-        'provider=${provider.name}, model=${provider.selectedModel}, '
-        '$sourceLanguage -> $targetLanguage');
-
-    // Translate chunks sequentially
-    String previousContext = '';
-    for (int i = 0; i < chunks.length; i++) {
-      dlog('JOB', '--- chunk ${i + 1}/${chunks.length} ---');
-
-      if (_cancelled) {
-        dlog('JOB', '  CANCELLED before chunk ${i + 1}');
-        final cancelled = job.copyWith(
-          status: TranslationStatus.cancelled,
-          chunks: state!.chunks,
-        );
-        state = cancelled;
-        await _storage.saveJob(cancelled);
-        return;
+      // ── Step 5: Save to storage (with timeout) ──
+      dlog('JOB', '  [step 5] saving job to storage...');
+      try {
+        await _storage.saveJob(job)
+            .timeout(const Duration(seconds: 5), onTimeout: () {
+          dlog('JOB', '  [step 5] TIMEOUT after 5s — continuing without save');
+          throw TimeoutException('Storage save timed out');
+        });
+        dlog('JOB', '  [step 5] save OK');
+      } catch (saveErr) {
+        dlog('JOB', '  [step 5] save FAILED: $saveErr — continuing anyway');
+        // Do NOT return here. Translation can work without persistence.
       }
 
-      // Update chunk status to show progress
-      final progressChunks = List<TranslatedChunk>.from(state!.chunks);
-      state = job.copyWith(
-        chunks: progressChunks,
-        progress: i / chunks.length,
-      );
-      dlog('JOB', '  state updated, progress: ${(i / chunks.length * 100).toStringAsFixed(0)}%');
+      // ── Step 6: Translate chunks ──
+      dlog('JOB', '  [step 6] entering chunk loop (${chunks.length} chunks)');
+      String previousContext = '';
 
-      try {
-        dlog('JOB', '  calling _repository.translateChunk...');
-        dlog('JOB', '  cancelToken attached: ${_cancelToken != null}');
-
-        final translated = await _repository.translateChunk(
-          text: chunks[i],
-          sourceLanguage: sourceLanguage,
-          targetLanguage: targetLanguage,
-          profile: profile,
-          provider: provider,
-          customPrompt: customPrompt,
-          glossary: glossary,
-          previousContext: previousContext,
-          cancelToken: _cancelToken,
-        );
-
-        dlog('JOB', '  translateChunk returned: ${translated.length} chars');
+      for (int i = 0; i < chunks.length; i++) {
+        dlog('JOB', '  --- chunk ${i + 1}/${chunks.length} ---');
 
         if (_cancelled) {
-          dlog('JOB', '  CANCELLED after chunk ${i + 1}');
-          final cancelled = job.copyWith(
-            status: TranslationStatus.cancelled,
-            chunks: state!.chunks,
-          );
-          state = cancelled;
-          await _storage.saveJob(cancelled);
+          dlog('JOB', '  cancelled before chunk ${i + 1}');
+          _setCancelled();
           return;
         }
 
-        final updatedChunks = List<TranslatedChunk>.from(state!.chunks);
-        updatedChunks[i] = updatedChunks[i].copyWith(
-          translatedText: translated,
-          isComplete: true,
+        state = job.copyWith(
+          chunks: List<TranslatedChunk>.from(state!.chunks),
+          progress: i / chunks.length,
         );
 
-        final progress = (i + 1) / chunks.length;
-        final updated = job.copyWith(
-          chunks: updatedChunks,
-          progress: progress,
-        );
-        state = updated;
-        await _storage.saveJob(updated);
-
-        dlog('JOB', '  chunk ${i + 1} complete. progress: ${(progress * 100).toStringAsFixed(0)}%');
-
-        previousContext = translated;
-      } catch (e, stackTrace) {
-        final errorMsg = _extractErrorMessage(e);
-
-        dlog('JOB', '  *** EXCEPTION on chunk ${i + 1} ***');
-        dlog('JOB', '  type: ${e.runtimeType}');
-        dlog('JOB', '  message: $errorMsg');
-        dlog('JOB', '  toString: ${e.toString()}');
-        dlog('JOB', '  stackTrace: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
-
-        _logger.e(
-          'Translation FAILED on chunk ${i + 1}/${chunks.length}: $errorMsg',
-          error: e,
-          stackTrace: stackTrace,
-        );
-
-        dlog('JOB', '  transitioning state to FAILED...');
-
-        // Transition UI to Failed state with the real error message.
         try {
+          dlog('JOB', '  [chunk ${i + 1}] calling repository.translateChunk...');
+          final translated = await _repository.translateChunk(
+            text: chunks[i],
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            profile: profile,
+            provider: provider,
+            customPrompt: customPrompt,
+            glossary: glossary,
+            previousContext: previousContext,
+            cancelToken: _cancelToken,
+          );
+
+          dlog('JOB', '  [chunk ${i + 1}] OK: ${translated.length} chars');
+
+          if (_cancelled) {
+            _setCancelled();
+            return;
+          }
+
           final updatedChunks = List<TranslatedChunk>.from(state!.chunks);
           updatedChunks[i] = updatedChunks[i].copyWith(
-            errorMessage: errorMsg,
+            translatedText: translated,
+            isComplete: true,
           );
-          final updated = job.copyWith(
-            chunks: updatedChunks,
-            status: TranslationStatus.failed,
-            errorMessage: 'Chunk ${i + 1} failed: $errorMsg',
-          );
-          state = updated;
-          dlog('JOB', '  state set to FAILED: $errorMsg');
-          await _storage.saveJob(updated);
-          dlog('JOB', '  failed state saved to storage');
-        } catch (saveError) {
-          dlog('JOB', '  saveJob ALSO FAILED: $saveError');
-          _logger.e('Failed to persist error state: $saveError');
-          state = job.copyWith(
-            status: TranslationStatus.failed,
-            errorMessage: 'Chunk ${i + 1} failed: $errorMsg',
-          );
-          dlog('JOB', '  state set to FAILED (in-memory only)');
+
+          final progress = (i + 1) / chunks.length;
+          state = job.copyWith(chunks: updatedChunks, progress: progress);
+
+          // Fire-and-forget persistence — don't block the next chunk.
+          _storage.saveJob(state!).catchError((e) {
+            dlog('JOB', '  saveJob after chunk failed: $e');
+          });
+
+          previousContext = translated;
+        } catch (e, stackTrace) {
+          final errorMsg = _extractErrorMessage(e);
+          dlog('JOB', '  *** chunk ${i + 1} EXCEPTION ***');
+          dlog('JOB', '  type: ${e.runtimeType}');
+          dlog('JOB', '  message: $errorMsg');
+          dlog('JOB', '  stack: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
+
+          _logger.e('Translation FAILED chunk ${i + 1}: $errorMsg',
+              error: e, stackTrace: stackTrace);
+
+          _setFailed('Chunk ${i + 1} failed: $errorMsg');
+          return;
         }
-        return;
+      }
+
+      // ── Step 7: Completed ──
+      dlog('JOB', '=== TRANSLATION COMPLETED ===');
+      final completed = job.copyWith(
+        chunks: state!.chunks,
+        status: TranslationStatus.completed,
+        progress: 1.0,
+        completedAt: DateTime.now(),
+      );
+      state = completed;
+      _storage.saveJob(completed).catchError((e) {
+        dlog('JOB', '  saveJob completed failed: $e');
+      });
+
+    } catch (e, stackTrace) {
+      // Top-level safety net: NO exception can escape from startTranslation.
+      dlog('JOB', '=== UNHANDLED EXCEPTION in startTranslation ===');
+      dlog('JOB', '  type: ${e.runtimeType}');
+      dlog('JOB', '  error: $e');
+      dlog('JOB', '  stack: ${stackTrace.toString().split('\n').take(8).join('\n  ')}');
+
+      _logger.e('startTranslation unhandled error',
+          error: e, stackTrace: stackTrace);
+
+      // Try to set Failed state so the UI is never stuck in Loading.
+      try {
+        _setFailed('Unexpected error: $e');
+      } catch (_) {
+        dlog('JOB', '  COULD NOT set Failed state — UI may be stuck');
       }
     }
+  }
 
-    // Completed
-    dlog('JOB', '=== Translation COMPLETED ===');
-    _logger.i('Translation completed: ${chunks.length} chunk(s)');
-    final completed = job.copyWith(
-      chunks: state!.chunks,
-      status: TranslationStatus.completed,
-      progress: 1.0,
-      completedAt: DateTime.now(),
-    );
-    state = completed;
-    await _storage.saveJob(completed);
-    dlog('JOB', '  completed state saved');
+  void _setFailed(String message) {
+    final current = state;
+    if (current != null) {
+      state = current.copyWith(
+        status: TranslationStatus.failed,
+        errorMessage: message,
+      );
+    } else {
+      state = TranslationJob(
+        id: _uuid.v4(),
+        documentId: '',
+        documentName: 'Text Input',
+        sourceLanguage: '',
+        targetLanguage: '',
+        profile: TranslationProfile.balanced,
+        status: TranslationStatus.failed,
+        errorMessage: message,
+        createdAt: DateTime.now(),
+      );
+    }
+    dlog('JOB', '  state -> FAILED: $message');
+  }
+
+  void _setCancelled() {
+    final current = state;
+    if (current != null) {
+      state = current.copyWith(status: TranslationStatus.cancelled);
+    }
+    dlog('JOB', '  state -> CANCELLED');
   }
 
   /// Cancel the running translation.
   void cancel() {
-    dlog('JOB', 'cancel() called, _cancelled=$_cancelled');
-    dlog('JOB', '  _cancelToken: ${_cancelToken?.hashCode}');
-    dlog('JOB', '  _cancelToken.isCancelled: ${_cancelToken?.isCancelled}');
+    dlog('JOB', 'cancel() called');
     _cancelled = true;
     _cancelToken?.cancel('Translation cancelled by user');
-    dlog('JOB', '  cancelToken.cancel() called');
+    dlog('JOB', '  _cancelled=$_cancelled, token cancelled=${_cancelToken?.isCancelled}');
   }
 
   String getTranslatedText() {
