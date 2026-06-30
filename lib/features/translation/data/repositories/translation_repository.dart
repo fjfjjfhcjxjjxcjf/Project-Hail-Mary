@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:logger/logger.dart';
 import '../../domain/entities/translation_job.dart';
 import '../../domain/entities/ai_provider.dart';
 import '../../domain/entities/glossary.dart';
@@ -7,7 +6,6 @@ import '../sources/translation_data_source.dart';
 
 class TranslationRepository {
   final TranslationDataSource _dataSource;
-  final Logger _logger = Logger(printer: PrettyPrinter(methodCount: 0));
 
   TranslationRepository(this._dataSource);
 

@@ -104,7 +104,7 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
           sourceLanguage: sourceLanguage,
           targetLanguage: targetLanguage,
           profile: profile,
-          provider: provider!,
+          provider: provider,
           customPrompt: customPrompt,
           glossary: glossary,
           previousContext: previousContext,
