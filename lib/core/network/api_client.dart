@@ -6,6 +6,7 @@ import '../debug/debug_log.dart';
 class ApiClient {
   final Dio _dio;
   final Logger _logger = Logger(printer: PrettyPrinter(methodCount: 0));
+  String? _apiKey;
 
   ApiClient({String? baseUrl, Map<String, String>? defaultHeaders})
       : _dio = Dio(BaseOptions(
@@ -18,6 +19,17 @@ class ApiClient {
           },
         )) {
     _dio.interceptors.addAll([
+      // Auth interceptor runs FIRST to guarantee the Authorization
+      // header is present on EVERY request, regardless of how Dio
+      // merges BaseOptions.headers with Options.headers.
+      InterceptorsWrapper(
+        onRequest: (options, handler) {
+          if (_apiKey != null && _apiKey!.isNotEmpty) {
+            options.headers['Authorization'] = 'Bearer $_apiKey';
+          }
+          handler.next(options);
+        },
+      ),
       _DebugInterceptor(),
       LogInterceptor(requestBody: false, responseBody: false, logPrint: _logger.d),
       RetryInterceptor(
@@ -39,6 +51,7 @@ class ApiClient {
   Dio get dio => _dio;
 
   void setAuthToken(String token) {
+    _apiKey = token;
     _dio.options.headers['Authorization'] = 'Bearer $token';
   }
 
@@ -59,24 +72,24 @@ class ApiClient {
   }
 }
 
-/// Interceptor that logs every request/response/error to DebugLog
-/// so the developer can see exactly what happens on a real device.
+/// Interceptor that logs every request/response/error to DebugLog.
 class _DebugInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     final uri = '${options.baseUrl}${options.path}';
     dlog('HTTP', '>>> ${options.method} $uri');
 
-    // Log request body (redacting the API key)
-    final sanitizedHeaders = Map<String, dynamic>.from(options.headers);
-    if (sanitizedHeaders.containsKey('Authorization')) {
-      sanitizedHeaders['Authorization'] = 'Bearer [REDACTED]';
-    }
-    dlog('HTTP', '    headers: $sanitizedHeaders');
+    // Log ALL headers individually so nothing is hidden by formatting.
+    options.headers.forEach((key, value) {
+      if (key == 'Authorization') {
+        dlog('HTTP', '    header: $key = Bearer [REDACTED]');
+      } else {
+        dlog('HTTP', '    header: $key = $value');
+      }
+    });
 
     if (options.data is Map) {
       final body = Map<String, dynamic>.from(options.data as Map);
-      // Redact messages to avoid huge log, but show structure
       if (body.containsKey('messages')) {
         final msgs = body['messages'] as List;
         body['messages'] = '${msgs.length} message(s)';
@@ -99,7 +112,6 @@ class _DebugInterceptor extends Interceptor {
     dlog('HTTP', '<<< ${response.statusCode} $uri');
     if (response.data is Map) {
       final data = response.data as Map;
-      // Log response keys and truncated content
       dlog('HTTP', '    keys: ${data.keys.toList()}');
       if (data.containsKey('choices')) {
         final choices = data['choices'] as List;
@@ -127,6 +139,17 @@ class _DebugInterceptor extends Interceptor {
     dlog('HTTP', '!!! ERROR ${err.type.name} $uri');
     dlog('HTTP', '    message: ${err.message}');
     dlog('HTTP', '    statusCode: ${err.response?.statusCode}');
+
+    // Log the ACTUAL headers that were sent in the failing request.
+    dlog('HTTP', '    sent headers:');
+    err.requestOptions.headers.forEach((key, value) {
+      if (key == 'Authorization') {
+        dlog('HTTP', '      $key = Bearer [REDACTED]');
+      } else {
+        dlog('HTTP', '      $key = $value');
+      }
+    });
+
     if (err.response?.data != null) {
       final respData = err.response!.data.toString();
       dlog('HTTP', '    response: ${respData.length > 500 ? respData.substring(0, 500) : respData}');
