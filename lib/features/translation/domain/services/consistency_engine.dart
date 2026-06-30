@@ -1,7 +1,6 @@
 import 'package:uuid/uuid.dart';
 import '../../../project/domain/entities/project.dart';
 import '../entities/translation_memory.dart';
-import '../entities/glossary.dart';
 import '../../../../core/storage/local_storage_service.dart';
 
 const _uuid = Uuid();

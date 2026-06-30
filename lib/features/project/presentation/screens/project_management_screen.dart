@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:uuid/uuid.dart';
 import '../../../../core/widgets/language_picker.dart';
 import '../../../../core/data/languages.dart';
 import '../../domain/entities/project.dart';
 import '../providers/project_provider.dart';
 
-const _uuid = Uuid();
 
 class ProjectManagementScreen extends ConsumerWidget {
   const ProjectManagementScreen({super.key});

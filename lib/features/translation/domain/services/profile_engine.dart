@@ -1,4 +1,3 @@
-import '../entities/prompt_template.dart';
 import '../entities/translation_job.dart';
 import '../entities/glossary.dart';
 

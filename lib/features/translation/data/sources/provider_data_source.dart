@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:logger/logger.dart';
 import '../../domain/entities/ai_provider.dart';
-import '../../../../core/errors/app_failure.dart';
 import '../../../../core/errors/error_handler.dart';
 import '../../../../core/network/api_client.dart';
 

@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 import '../../domain/entities/glossary.dart';
 import '../providers/glossary_provider.dart';
 
-const _uuid = Uuid();
 
 class GlossaryManagementScreen extends ConsumerWidget {
   const GlossaryManagementScreen({super.key});

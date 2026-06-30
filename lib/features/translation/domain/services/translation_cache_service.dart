@@ -1,15 +1,13 @@
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
-import '../../../../core/storage/local_storage_service.dart';
 import '../entities/translation_cache.dart';
 
 /// Smart Cache - avoids re-translating identical text.
 /// Uses content hashing for fast lookups.
 class TranslationCacheService {
-  final LocalStorageService _storage;
   final Map<String, CacheEntry> _memoryCache = {};
 
-  TranslationCacheService(this._storage);
+  TranslationCacheService();
 
   /// Generate a cache key from translation parameters.
   String _buildKey({

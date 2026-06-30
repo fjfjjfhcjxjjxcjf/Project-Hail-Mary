@@ -5,11 +5,8 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/data/languages.dart';
 import '../../../../core/widgets/language_picker.dart';
 import '../../domain/entities/translation_job.dart';
-import '../../domain/entities/ai_provider.dart';
 import '../providers/translation_job_provider.dart';
 import '../providers/ai_providers_provider.dart';
-import '../../domain/entities/glossary.dart';
-import '../providers/glossary_provider.dart';
 
 class TranslationScreen extends ConsumerStatefulWidget {
   const TranslationScreen({super.key});
