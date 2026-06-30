@@ -58,6 +58,21 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await _storage.saveSettings(state);
   }
 
+  Future<void> updateSourceLanguage(String code) async {
+    state = state.copyWith(sourceLanguage: code);
+    await _storage.saveSettings(state);
+  }
+
+  Future<void> updateTargetLanguage(String code) async {
+    state = state.copyWith(targetLanguage: code);
+    await _storage.saveSettings(state);
+  }
+
+  Future<void> updateLanguages(String source, String target) async {
+    state = state.copyWith(sourceLanguage: source, targetLanguage: target);
+    await _storage.saveSettings(state);
+  }
+
   Future<void> reset() async {
     const defaults = AppSettings();
     state = defaults;

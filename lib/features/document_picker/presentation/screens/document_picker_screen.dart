@@ -223,9 +223,10 @@ class DocumentPickerScreen extends ConsumerWidget {
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
         if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Image picked: ${file.name}. OCR processing coming soon.')),
-          );
+          // Navigate to translate with image path — OCR will happen there
+          final encodedPath = Uri.encodeComponent(file.path ?? '');
+          final encodedName = Uri.encodeComponent(file.name);
+          context.go('/translate?file=$encodedPath&name=$encodedName');
         }
       }
     } catch (e) {
@@ -238,37 +239,10 @@ class DocumentPickerScreen extends ConsumerWidget {
   }
 
   void _showDocumentPicked(BuildContext context, Document doc) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Document Selected'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(doc.name, style: const TextStyle(fontWeight: FontWeight.w600)),
-            const SizedBox(height: 8),
-            Text('Format: ${doc.format.name.toUpperCase()}'),
-            Text('Size: ${_formatSize(doc.sizeBytes)}'),
-            Text('Path: ${doc.path}'),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              // Navigate to translate tab and pass the document
-              context.go('/translate');
-            },
-            child: const Text('Start Translation'),
-          ),
-        ],
-      ),
-    );
+    // Navigate directly to translate with file info
+    final encodedPath = Uri.encodeComponent(doc.path);
+    final encodedName = Uri.encodeComponent(doc.name);
+    context.go('/translate?file=$encodedPath&name=$encodedName');
   }
 
   String _formatSize(int bytes) {

@@ -1,10 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/data/languages.dart';
 import '../../../../core/widgets/language_picker.dart';
+import '../../../settings/presentation/providers/settings_provider.dart';
 import '../../domain/entities/translation_job.dart';
+import '../../domain/entities/ai_provider.dart';
 import '../providers/translation_job_provider.dart';
 import '../providers/ai_providers_provider.dart';
 
@@ -16,10 +20,13 @@ class TranslationScreen extends ConsumerStatefulWidget {
 }
 
 class _TranslationScreenState extends ConsumerState<TranslationScreen> {
-  String _sourceLanguage = 'auto';
-  String _targetLanguage = 'fa';
+  late String _sourceLanguage;
+  late String _targetLanguage;
   TranslationProfile _selectedProfile = TranslationProfile.balanced;
   String? _selectedProviderId;
+  bool _initializedFromSettings = false;
+  bool _loadingFile = false;
+  String? _loadedFileName;
 
   final _sourceTextController = TextEditingController();
 
@@ -29,14 +36,167 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
     super.dispose();
   }
 
+  /// Initialize language selectors from persisted settings (once).
+  void _initFromSettings() {
+    if (_initializedFromSettings) return;
+    final settings = ref.read(settingsProvider);
+    _sourceLanguage = settings.sourceLanguage;
+    _targetLanguage = settings.targetLanguage;
+    _initializedFromSettings = true;
+  }
+
+  /// Persist current language selections.
+  void _persistLanguages() {
+    ref.read(settingsProvider.notifier).updateLanguages(
+          _sourceLanguage,
+          _targetLanguage,
+        );
+  }
+
+  /// Handle incoming file from document picker (query params).
+  void _handleIncomingFile() {
+    final state = GoRouterState.of(context);
+    final filePath = state.uri.queryParameters['file'];
+    final fileName = state.uri.queryParameters['name'];
+    if (filePath == null || filePath.isEmpty) return;
+    if (_loadedFileName == fileName) return; // Already handled
+
+    _loadedFileName = fileName;
+
+    final ext = filePath.split('.').last.toLowerCase();
+    final imageExtensions = ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff'];
+
+    if (imageExtensions.contains(ext)) {
+      _extractTextFromImage(filePath);
+    } else {
+      _readTextFile(filePath);
+    }
+  }
+
+  /// Read a text-based file and populate the source text field.
+  Future<void> _readTextFile(String path) async {
+    setState(() => _loadingFile = true);
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File not found')),
+          );
+        }
+        return;
+      }
+      final content = await file.readAsString();
+      if (content.trim().isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File is empty')),
+          );
+        }
+        return;
+      }
+      _sourceTextController.text = content;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Loaded ${_loadedFileName ?? "file"} (${content.length} chars)')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error reading file: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingFile = false);
+    }
+  }
+
+  /// Extract text from an image using the vision API.
+  Future<void> _extractTextFromImage(String imagePath) async {
+    setState(() => _loadingFile = true);
+    try {
+      final file = File(imagePath);
+      if (!await file.exists()) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Image file not found')),
+          );
+        }
+        return;
+      }
+
+      final bytes = await file.readAsBytes();
+      final base64Image = base64Encode(bytes);
+
+      // Find a vision-capable provider
+      final activeProviders = ref.read(activeProvidersProvider);
+      AiProvider? visionProvider;
+      for (final p in activeProviders) {
+        if (p.supportsVision) {
+          visionProvider = p;
+          break;
+        }
+      }
+      visionProvider ??= activeProviders.isNotEmpty ? activeProviders.first : null;
+
+      if (visionProvider == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No AI provider configured. Add an API key in Settings.')),
+          );
+        }
+        return;
+      }
+
+      final repository = ref.read(translationRepositoryProvider);
+      final extractedText = await repository.extractTextFromImage(
+        base64Image: base64Image,
+        provider: visionProvider,
+      );
+
+      if (extractedText.trim().isNotEmpty) {
+        _sourceTextController.text = extractedText;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Extracted text from ${_loadedFileName ?? "image"}')),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No text found in image')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Image OCR failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loadingFile = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    _initFromSettings();
+
     final colorScheme = Theme.of(context).colorScheme;
     final job = ref.watch(translationJobProvider);
     final activeProviders = ref.watch(activeProvidersProvider);
 
+    // Handle incoming file from document picker (deferred to after first build)
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleIncomingFile());
+
     final sourceLang = Languages.findByCode(_sourceLanguage);
     final targetLang = Languages.findByCode(_targetLanguage);
+
+    final isTranslating = job?.status == TranslationStatus.inProgress;
+    final isFailed = job?.status == TranslationStatus.failed;
+
     final translatedText = job?.status == TranslationStatus.completed
         ? ref.read(translationJobProvider.notifier).getTranslatedText()
         : job?.status == TranslationStatus.inProgress
@@ -46,8 +206,6 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                 .join('\n\n')
             : '';
 
-    final isTranslating = job?.status == TranslationStatus.inProgress;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Translate'),
@@ -55,7 +213,6 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
-              // Show recent jobs
               final jobs = ref.read(pastJobsProvider);
               if (jobs.isNotEmpty) {
                 _showRecentJobs(context, jobs);
@@ -90,7 +247,10 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                         currentCode: _sourceLanguage,
                         includeAutoDetect: true,
                       );
-                      if (code != null) setState(() => _sourceLanguage = code);
+                      if (code != null) {
+                        setState(() => _sourceLanguage = code);
+                        _persistLanguages();
+                      }
                     },
                   ),
                 ),
@@ -106,6 +266,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                               _sourceLanguage = _targetLanguage;
                               _targetLanguage = temp;
                             });
+                            _persistLanguages();
                           },
                     style: IconButton.styleFrom(
                       backgroundColor: colorScheme.primaryContainer,
@@ -121,7 +282,10 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                         currentCode: _targetLanguage,
                         includeAutoDetect: false,
                       );
-                      if (code != null) setState(() => _targetLanguage = code);
+                      if (code != null) {
+                        setState(() => _targetLanguage = code);
+                        _persistLanguages();
+                      }
                     },
                   ),
                 ),
@@ -136,7 +300,6 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: TranslationProfile.values
-                    .where((p) => p != TranslationProfile.custom || true)
                     .map((p) => Padding(
                           padding: const EdgeInsets.only(right: 8),
                           child: ChoiceChip(
@@ -173,6 +336,19 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
               ),
             ),
           const SizedBox(height: 8),
+          // Loading indicator for file import
+          if (_loadingFile)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  SizedBox(width: 8),
+                  Text('Loading file...'),
+                ],
+              ),
+            ),
           // Source text
           Expanded(
             child: Padding(
@@ -191,7 +367,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
             ),
           ),
           const SizedBox(height: 12),
-          // Translated text
+          // Translated text / error display
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -199,20 +375,23 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: colorScheme.surfaceContainerLow,
+                  color: isFailed
+                      ? colorScheme.errorContainer
+                      : colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: colorScheme.outlineVariant),
+                  border: Border.all(
+                    color: isFailed ? colorScheme.error : colorScheme.outlineVariant,
+                  ),
                 ),
                 child: Stack(
                   children: [
                     SingleChildScrollView(
-                      child: Text(
-                        translatedText.isEmpty
-                            ? (isTranslating ? 'Translating...' : 'Translation will appear here...')
-                            : translatedText,
-                        style: TextStyle(
-                          color: translatedText.isEmpty ? colorScheme.onSurfaceVariant : null,
-                        ),
+                      child: _buildResultContent(
+                        translatedText: translatedText,
+                        isTranslating: isTranslating,
+                        isFailed: isFailed,
+                        errorMessage: job?.errorMessage,
+                        colorScheme: colorScheme,
                       ),
                     ),
                     if (isTranslating)
@@ -275,10 +454,6 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                   tooltip: 'Clear',
                   onPressed: () {
                     _sourceTextController.clear();
-                    // Reset job state if not running
-                    if (!isTranslating) {
-                      // Allow user to start fresh
-                    }
                   },
                 ),
               ],
@@ -287,6 +462,56 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildResultContent({
+    required String translatedText,
+    required bool isTranslating,
+    required bool isFailed,
+    String? errorMessage,
+    required ColorScheme colorScheme,
+  }) {
+    if (isFailed) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.error_outline, color: colorScheme.error, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Translation Failed',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onErrorContainer,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            errorMessage ?? 'An unknown error occurred',
+            style: TextStyle(color: colorScheme.onErrorContainer),
+          ),
+        ],
+      );
+    }
+
+    if (translatedText.isEmpty && isTranslating) {
+      return Text(
+        'Translating...',
+        style: TextStyle(color: colorScheme.onSurfaceVariant),
+      );
+    }
+
+    if (translatedText.isEmpty) {
+      return Text(
+        'Translation will appear here...',
+        style: TextStyle(color: colorScheme.onSurfaceVariant),
+      );
+    }
+
+    return Text(translatedText);
   }
 
   void _translate() {
@@ -312,14 +537,38 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
       return;
     }
 
+    // Validate that the selected provider has a model
+    AiProvider? selectedProvider;
+    if (_selectedProviderId != null) {
+      selectedProvider = activeProviders.where((p) => p.id == _selectedProviderId).firstOrNull;
+    }
+    selectedProvider ??= activeProviders.first;
+
+    if (selectedProvider.selectedModel.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${selectedProvider.name} has no model selected. Configure in Providers.'),
+          action: SnackBarAction(
+            label: 'Configure',
+            onPressed: () => context.push('/providers'),
+          ),
+        ),
+      );
+      return;
+    }
+
+    _persistLanguages();
+
     ref.read(translationJobProvider.notifier).startTranslation(
-      text: text,
-      sourceLanguage: _sourceLanguage == 'auto' ? 'Auto Detect' : (Languages.findByCode(_sourceLanguage)?.name ?? _sourceLanguage),
-      targetLanguage: Languages.findByCode(_targetLanguage)?.name ?? _targetLanguage,
-      profile: _selectedProfile,
-      providerId: _selectedProviderId,
-      chunkSize: 2000,
-    );
+          text: text,
+          sourceLanguage: _sourceLanguage == 'auto'
+              ? 'Auto Detect'
+              : (Languages.findByCode(_sourceLanguage)?.name ?? _sourceLanguage),
+          targetLanguage: Languages.findByCode(_targetLanguage)?.name ?? _targetLanguage,
+          profile: _selectedProfile,
+          providerId: _selectedProviderId,
+          chunkSize: 2000,
+        );
   }
 
   void _showRecentJobs(BuildContext context, List<TranslationJob> jobs) {
@@ -336,7 +585,6 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
             trailing: Text(job.status.name),
             onTap: () {
               Navigator.pop(ctx);
-              // Could reload job into view
             },
           );
         },

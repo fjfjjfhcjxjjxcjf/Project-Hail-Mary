@@ -49,6 +49,16 @@ class TranslationRepository {
     );
   }
 
+  Future<String> extractTextFromImage({
+    required String base64Image,
+    required AiProvider provider,
+  }) {
+    return _dataSource.extractTextFromImage(
+      base64Image: base64Image,
+      provider: provider,
+    );
+  }
+
   List<String> chunkText(String text, int chunkSize) {
     if (text.length <= chunkSize) return [text];
 

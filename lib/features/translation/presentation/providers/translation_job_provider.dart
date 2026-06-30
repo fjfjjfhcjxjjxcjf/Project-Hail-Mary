@@ -182,6 +182,11 @@ final translationJobProvider =
   return TranslationJobNotifier(repository, storage, activeProviders);
 });
 
+/// Direct access to the translation repository for non-job operations (e.g. image OCR).
+final translationRepositoryProvider = Provider<TranslationRepository>((ref) {
+  return TranslationRepository(TranslationDataSourceImpl());
+});
+
 /// List of past translation jobs.
 final pastJobsProvider = Provider<List<TranslationJob>>((ref) {
   final storage = ref.watch(localStorageServiceProvider);

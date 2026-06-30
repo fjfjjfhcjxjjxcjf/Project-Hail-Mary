@@ -26,6 +26,10 @@ abstract class TranslationDataSource {
     required AiProvider provider,
     String customPrompt = '',
   });
+  Future<String> extractTextFromImage({
+    required String base64Image,
+    required AiProvider provider,
+  });
 }
 
 class TranslationDataSourceImpl implements TranslationDataSource {
@@ -42,6 +46,12 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     List<GlossaryEntry> glossary = const [],
     String previousContext = '',
   }) async {
+    if (provider.selectedModel.isEmpty) {
+      throw const AppFailure.translation(
+        message: 'No model selected. Please select a model in Provider settings.',
+      );
+    }
+
     final client = ApiClient(baseUrl: provider.baseUrl);
     try {
       if (provider.apiKey.isNotEmpty) {
@@ -98,6 +108,12 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     required AiProvider provider,
     String customPrompt = '',
   }) async* {
+    if (provider.selectedModel.isEmpty) {
+      throw const AppFailure.translation(
+        message: 'No model selected. Please select a model in Provider settings.',
+      );
+    }
+
     final client = ApiClient(baseUrl: provider.baseUrl);
     try {
       if (provider.apiKey.isNotEmpty) {
@@ -152,6 +168,61 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           }
         }
       }
+    } finally {
+      client.dispose();
+    }
+  }
+
+  @override
+  Future<String> extractTextFromImage({
+    required String base64Image,
+    required AiProvider provider,
+  }) async {
+    final client = ApiClient(baseUrl: provider.baseUrl);
+    try {
+      if (provider.apiKey.isNotEmpty) {
+        client.setAuthToken(provider.apiKey);
+      }
+
+      final response = await client.post<Map<String, dynamic>>(
+        '/chat/completions',
+        data: {
+          'model': provider.selectedModel,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'text',
+                  'text': 'Extract all text from this image. '
+                      'Return ONLY the extracted text, preserving the original layout and formatting. '
+                      'Do not add any commentary or explanation.',
+                },
+                {
+                  'type': 'image_url',
+                  'image_url': {
+                    'url': 'data:image/jpeg;base64,$base64Image',
+                  },
+                },
+              ],
+            },
+          ],
+          'temperature': 0.1,
+          'max_tokens': 4096,
+        },
+      );
+
+      final data = response.data;
+      if (data == null) throw const AppFailure.translation(message: 'Empty response from vision API');
+      final choices = data['choices'] as List?;
+      if (choices == null || choices.isEmpty) throw const AppFailure.translation(message: 'No choices in vision response');
+      return choices[0]['message']['content'] as String;
+    } on DioException catch (e) {
+      _logger.e('Vision API error: ${e.message}');
+      throw mapDioException(e);
+    } catch (e) {
+      _logger.e('Vision error: $e');
+      throw AppFailure.translation(message: 'Image text extraction failed: $e');
     } finally {
       client.dispose();
     }

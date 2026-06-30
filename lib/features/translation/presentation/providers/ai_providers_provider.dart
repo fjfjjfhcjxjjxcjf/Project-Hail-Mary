@@ -56,7 +56,10 @@ List<AiProvider> get _defaultProviders => [
     name: 'OpenRouter',
     type: ProviderType.openrouter,
     baseUrl: 'https://openrouter.ai/api/v1',
+    models: ['openai/gpt-4o-mini', 'openai/gpt-4o', 'anthropic/claude-sonnet-4-20250514', 'google/gemini-2.0-flash-001', 'deepseek/deepseek-chat'],
+    selectedModel: 'openai/gpt-4o-mini',
     supportsStreaming: true,
+    supportsVision: true,
     maxContextLength: 128000,
   ),
   AiProvider(
@@ -92,7 +95,15 @@ class ProvidersNotifier extends StateNotifier<List<AiProvider>> {
         _storage.saveProvider(p);
       }
     } else {
-      state = saved;
+      // Ensure every provider has a selectedModel if it has models available
+      state = saved.map((p) {
+        if (p.selectedModel.isEmpty && p.models.isNotEmpty) {
+          final fixed = p.copyWith(selectedModel: p.models.first);
+          _storage.saveProvider(fixed);
+          return fixed;
+        }
+        return p;
+      }).toList();
     }
   }
 

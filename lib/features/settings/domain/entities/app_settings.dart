@@ -19,6 +19,8 @@ class AppSettings with _$AppSettings {
     @Default(true) bool backgroundTranslation,
     @Default(true) bool notifications,
     @Default('pdf') String defaultExportFormat,
+    @Default('auto') String sourceLanguage,
+    @Default('fa') String targetLanguage,
   }) = _AppSettings;
 
   factory AppSettings.fromJson(Map<String, dynamic> json) => _$AppSettingsFromJson(json);
