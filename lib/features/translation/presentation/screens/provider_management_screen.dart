@@ -4,13 +4,28 @@ import '../../domain/entities/ai_provider.dart';
 import '../../data/sources/provider_data_source.dart';
 import '../providers/ai_providers_provider.dart';
 
+/// Family provider: returns a single AiProvider by id, or null if removed.
+/// Each card watches this instead of the full list, so only the changed
+/// card rebuilds when the user edits a key or selects a model.
+final providerByIdProvider = Provider.family<AiProvider?, String>((ref, id) {
+  final all = ref.watch(providersProvider);
+  try {
+    return all.firstWhere((p) => p.id == id);
+  } catch (_) {
+    return null;
+  }
+});
+
 class ProviderManagementScreen extends ConsumerWidget {
   const ProviderManagementScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final providers = ref.watch(providersProvider);
-    final colorScheme = Theme.of(context).colorScheme;
+    // Watch the list only for structure changes (add/remove).
+    // Individual card data is watched inside each _ProviderCard.
+    final providerIds = ref.watch(providersProvider.select(
+      (list) => list.map((p) => p.id).toList(),
+    ));
 
     return Scaffold(
       appBar: AppBar(
@@ -24,168 +39,10 @@ class ProviderManagementScreen extends ConsumerWidget {
       ),
       body: ListView.builder(
         padding: const EdgeInsets.all(16),
-        itemCount: providers.length,
+        itemCount: providerIds.length,
         itemBuilder: (context, index) {
-          final provider = providers[index];
-          final hasKey = provider.apiKey.isNotEmpty;
-          return Card(
-            margin: const EdgeInsets.only(bottom: 12),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _iconForType(provider.type),
-                        color: hasKey ? colorScheme.primary : colorScheme.outline,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              provider.name,
-                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-                            ),
-                            Text(
-                              provider.type.name.toUpperCase(),
-                              style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
-                            ),
-                          ],
-                        ),
-                      ),
-                      // Status indicator
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: hasKey
-                              ? colorScheme.primaryContainer
-                              : colorScheme.errorContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          hasKey ? 'Active' : 'No API Key',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w500,
-                            color: hasKey
-                                ? colorScheme.onPrimaryContainer
-                                : colorScheme.onErrorContainer,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  // Model selector
-                  if (provider.models.isNotEmpty) ...[
-                    Text('Model', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
-                    const SizedBox(height: 4),
-                    DropdownButtonFormField<String>(
-                      value: provider.selectedModel.isNotEmpty ? provider.selectedModel : null,
-                      items: provider.models
-                          .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 13))))
-                          .toList(),
-                      onChanged: (v) {
-                        if (v != null) {
-                          ref.read(providersProvider.notifier).setSelectedModel(provider.id, v);
-                        }
-                      },
-                      decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                  // API Key field
-                  Text('API Key', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
-                  const SizedBox(height: 4),
-                  _ApiKeyField(
-                    initialValue: provider.apiKey,
-                    providerType: provider.type,
-                    onChanged: (key) {
-                      ref.read(providersProvider.notifier).setApiKey(provider.id, key);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  // Actions
-                  Row(
-                    children: [
-                      TextButton.icon(
-                        icon: const Icon(Icons.vpn_key, size: 16),
-                        label: const Text('Test Key'),
-                        onPressed: hasKey ? () => _testApiKey(context, ref, provider) : null,
-                      ),
-                      const Spacer(),
-                      if (provider.type == ProviderType.custom)
-                        TextButton.icon(
-                          icon: const Icon(Icons.delete_outline, size: 16),
-                          label: const Text('Remove'),
-                          style: TextButton.styleFrom(foregroundColor: colorScheme.error),
-                          onPressed: () => _confirmDelete(context, ref, provider),
-                        ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
+          return _ProviderCard(providerId: providerIds[index]);
         },
-      ),
-    );
-  }
-
-  IconData _iconForType(ProviderType type) {
-    switch (type) {
-      case ProviderType.openai:
-        return Icons.auto_awesome;
-      case ProviderType.gemini:
-        return Icons.diamond;
-      case ProviderType.openrouter:
-        return Icons.hub;
-      case ProviderType.deepseek:
-        return Icons.psychology;
-      case ProviderType.claude:
-        return Icons.smart_toy;
-      case ProviderType.ollama:
-      case ProviderType.lmStudio:
-        return Icons.computer;
-      case ProviderType.custom:
-        return Icons.extension;
-    }
-  }
-
-  void _testApiKey(BuildContext context, WidgetRef ref, AiProvider provider) async {
-    final scaffold = ScaffoldMessenger.of(context);
-    scaffold.showSnackBar(SnackBar(content: Text('Testing ${provider.name}...')));
-
-    final dataSource = ProviderDataSourceImpl();
-    final valid = await dataSource.validateApiKey(provider);
-
-    scaffold.clearSnackBars();
-    scaffold.showSnackBar(SnackBar(
-      content: Text(valid ? '${provider.name} is working!' : '${provider.name} key is invalid'),
-      backgroundColor: valid ? Colors.green : Colors.red,
-    ));
-  }
-
-  void _confirmDelete(BuildContext context, WidgetRef ref, AiProvider provider) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Remove Provider'),
-        content: Text('Remove ${provider.name}?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-          FilledButton(
-            onPressed: () {
-              ref.read(providersProvider.notifier).remove(provider.id);
-              Navigator.pop(ctx);
-            },
-            child: const Text('Remove'),
-          ),
-        ],
       ),
     );
   }
@@ -271,12 +128,189 @@ class ProviderManagementScreen extends ConsumerWidget {
   }
 }
 
+/// Individual provider card — only rebuilds when THIS provider changes.
+class _ProviderCard extends ConsumerWidget {
+  final String providerId;
+
+  const _ProviderCard({required this.providerId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final provider = ref.watch(providerByIdProvider(providerId));
+    if (provider == null) return const SizedBox.shrink();
+
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasKey = provider.apiKey.isNotEmpty;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  _iconForType(provider.type),
+                  color: hasKey ? colorScheme.primary : colorScheme.outline,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        provider.name,
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                      ),
+                      Text(
+                        provider.type.name.toUpperCase(),
+                        style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                // Status indicator
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: hasKey
+                        ? colorScheme.primaryContainer
+                        : colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    hasKey ? 'Active' : 'No API Key',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: hasKey
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // Model selector
+            if (provider.models.isNotEmpty) ...[
+              Text('Model', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+              const SizedBox(height: 4),
+              DropdownButtonFormField<String>(
+                value: provider.selectedModel.isNotEmpty ? provider.selectedModel : null,
+                items: provider.models
+                    .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 13))))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) {
+                    ref.read(providersProvider.notifier).setSelectedModel(provider.id, v);
+                  }
+                },
+                decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+              ),
+              const SizedBox(height: 12),
+            ],
+            // API Key field
+            Text('API Key', style: TextStyle(fontSize: 12, color: colorScheme.onSurfaceVariant)),
+            const SizedBox(height: 4),
+            _ApiKeyField(
+              providerId: provider.id,
+              initialValue: provider.apiKey,
+              providerType: provider.type,
+              onChanged: (key) {
+                ref.read(providersProvider.notifier).setApiKey(provider.id, key);
+              },
+            ),
+            const SizedBox(height: 12),
+            // Actions
+            Row(
+              children: [
+                TextButton.icon(
+                  icon: const Icon(Icons.vpn_key, size: 16),
+                  label: const Text('Test Key'),
+                  onPressed: hasKey ? () => _testApiKey(context, ref, provider) : null,
+                ),
+                const Spacer(),
+                if (provider.type == ProviderType.custom)
+                  TextButton.icon(
+                    icon: const Icon(Icons.delete_outline, size: 16),
+                    label: const Text('Remove'),
+                    style: TextButton.styleFrom(foregroundColor: colorScheme.error),
+                    onPressed: () => _confirmDelete(context, ref, provider),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _iconForType(ProviderType type) {
+    switch (type) {
+      case ProviderType.openai:
+        return Icons.auto_awesome;
+      case ProviderType.gemini:
+        return Icons.diamond;
+      case ProviderType.openrouter:
+        return Icons.hub;
+      case ProviderType.deepseek:
+        return Icons.psychology;
+      case ProviderType.claude:
+        return Icons.smart_toy;
+      case ProviderType.ollama:
+      case ProviderType.lmStudio:
+        return Icons.computer;
+      case ProviderType.custom:
+        return Icons.extension;
+    }
+  }
+
+  void _testApiKey(BuildContext context, WidgetRef ref, AiProvider provider) async {
+    final scaffold = ScaffoldMessenger.of(context);
+    scaffold.showSnackBar(SnackBar(content: Text('Testing ${provider.name}...')));
+
+    final dataSource = ProviderDataSourceImpl();
+    final valid = await dataSource.validateApiKey(provider);
+
+    scaffold.clearSnackBars();
+    scaffold.showSnackBar(SnackBar(
+      content: Text(valid ? '${provider.name} is working!' : '${provider.name} key is invalid'),
+      backgroundColor: valid ? Colors.green : Colors.red,
+    ));
+  }
+
+  void _confirmDelete(BuildContext context, WidgetRef ref, AiProvider provider) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Provider'),
+        content: Text('Remove ${provider.name}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              ref.read(providersProvider.notifier).remove(provider.id);
+              Navigator.pop(ctx);
+            },
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ApiKeyField extends StatefulWidget {
+  final String providerId;
   final String initialValue;
   final ProviderType providerType;
   final ValueChanged<String> onChanged;
 
   const _ApiKeyField({
+    required this.providerId,
     required this.initialValue,
     required this.providerType,
     required this.onChanged,
@@ -294,6 +328,16 @@ class _ApiKeyFieldState extends State<_ApiKeyField> {
   void initState() {
     super.initState();
     _ctrl = TextEditingController(text: widget.initialValue);
+  }
+
+  @override
+  void didUpdateWidget(_ApiKeyField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Sync controller if the key was changed externally (e.g. loaded from storage).
+    if (oldWidget.providerId != widget.providerId ||
+        (oldWidget.initialValue != widget.initialValue && _ctrl.text != widget.initialValue)) {
+      _ctrl.text = widget.initialValue;
+    }
   }
 
   @override

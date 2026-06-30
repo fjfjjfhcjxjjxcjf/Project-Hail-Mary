@@ -25,6 +25,8 @@ _$AppSettingsImpl _$$AppSettingsImplFromJson(Map<String, dynamic> json) =>
       backgroundTranslation: json['backgroundTranslation'] as bool? ?? true,
       notifications: json['notifications'] as bool? ?? true,
       defaultExportFormat: json['defaultExportFormat'] as String? ?? 'pdf',
+      sourceLanguage: json['sourceLanguage'] as String? ?? 'auto',
+      targetLanguage: json['targetLanguage'] as String? ?? 'fa',
     );
 
 Map<String, dynamic> _$$AppSettingsImplToJson(_$AppSettingsImpl instance) =>
@@ -40,6 +42,8 @@ Map<String, dynamic> _$$AppSettingsImplToJson(_$AppSettingsImpl instance) =>
       'backgroundTranslation': instance.backgroundTranslation,
       'notifications': instance.notifications,
       'defaultExportFormat': instance.defaultExportFormat,
+      'sourceLanguage': instance.sourceLanguage,
+      'targetLanguage': instance.targetLanguage,
     };
 
 const _$AppThemeModeEnumMap = {

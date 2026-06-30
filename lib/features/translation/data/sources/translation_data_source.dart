@@ -17,6 +17,7 @@ abstract class TranslationDataSource {
     String customPrompt = '',
     List<GlossaryEntry> glossary = const [],
     String previousContext = '',
+    CancelToken? cancelToken,
   });
   Stream<String> translateChunkStream({
     required String text,
@@ -25,10 +26,12 @@ abstract class TranslationDataSource {
     required TranslationProfile profile,
     required AiProvider provider,
     String customPrompt = '',
+    CancelToken? cancelToken,
   });
   Future<String> extractTextFromImage({
     required String base64Image,
     required AiProvider provider,
+    CancelToken? cancelToken,
   });
 }
 
@@ -45,6 +48,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     String customPrompt = '',
     List<GlossaryEntry> glossary = const [],
     String previousContext = '',
+    CancelToken? cancelToken,
   }) async {
     if (provider.selectedModel.isEmpty) {
       throw const AppFailure.translation(
@@ -70,27 +74,32 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           ? 'Previous context for continuity:\n$previousContext\n\n---\n\nText to translate:\n$text'
           : text;
 
+      final requestBody = _buildChatRequest(
+        provider: provider,
+        systemPrompt: systemPrompt,
+        userContent: userContent,
+        stream: false,
+      );
+
+      final endpoint = _chatEndpoint(provider);
+
       final response = await client.post<Map<String, dynamic>>(
-        '/chat/completions',
-        data: {
-          'model': provider.selectedModel,
-          'messages': [
-            {'role': 'system', 'content': systemPrompt},
-            {'role': 'user', 'content': userContent},
-          ],
-          'temperature': 0.3,
-          'stream': false,
-        },
+        endpoint,
+        data: requestBody,
+        cancelToken: cancelToken,
       );
 
       final data = response.data;
       if (data == null) throw const AppFailure.translation(message: 'Empty response');
-      final choices = data['choices'] as List?;
-      if (choices == null || choices.isEmpty) throw const AppFailure.translation(message: 'No choices in response');
-      return choices[0]['message']['content'] as String;
+      return _parseChatResponse(data, provider);
     } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        throw const AppFailure.translation(message: 'Translation cancelled');
+      }
       _logger.e('Translation API error: ${e.message}');
       throw mapDioException(e);
+    } on AppFailure {
+      rethrow;
     } catch (e) {
       _logger.e('Translation error: $e');
       throw AppFailure.translation(message: e.toString());
@@ -107,6 +116,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     required TranslationProfile profile,
     required AiProvider provider,
     String customPrompt = '',
+    CancelToken? cancelToken,
   }) async* {
     if (provider.selectedModel.isEmpty) {
       throw const AppFailure.translation(
@@ -127,18 +137,20 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         customPrompt: customPrompt,
       );
 
+      final requestBody = _buildChatRequest(
+        provider: provider,
+        systemPrompt: systemPrompt,
+        userContent: text,
+        stream: true,
+      );
+
+      final endpoint = _chatEndpoint(provider);
+
       final response = await client.dio.post<ResponseBody>(
-        '/chat/completions',
-        data: {
-          'model': provider.selectedModel,
-          'messages': [
-            {'role': 'system', 'content': systemPrompt},
-            {'role': 'user', 'content': text},
-          ],
-          'temperature': 0.3,
-          'stream': true,
-        },
+        endpoint,
+        data: requestBody,
         options: Options(responseType: ResponseType.stream),
+        cancelToken: cancelToken,
       );
 
       final stream = response.data?.stream;
@@ -154,8 +166,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           if (line.startsWith('data: ') && line != 'data: [DONE]') {
             try {
               final json = line.substring(6);
-              // Simple JSON parsing for content delta
-              final contentMatch = RegExp(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"\s*').firstMatch(json);
+              final contentMatch = RegExp(r'"content"\s*:\s*"((?:[^"\\]|\\.)*)"').firstMatch(json);
               if (contentMatch != null) {
                 final content = contentMatch.group(1)!
                     .replaceAll('\\n', '\n')
@@ -164,10 +175,19 @@ class TranslationDataSourceImpl implements TranslationDataSource {
                     .replaceAll('\\\\', '\\');
                 yield content;
               }
-            } catch (_) {}
+            } catch (e) {
+              // Log but do not abort the stream — a single malformed SSE
+              // chunk should not kill the entire translation.
+              _logger.w('Failed to parse SSE chunk: $e\n  line: $line');
+            }
           }
         }
       }
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        throw const AppFailure.translation(message: 'Translation cancelled');
+      }
+      throw mapDioException(e);
     } finally {
       client.dispose();
     }
@@ -177,6 +197,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
   Future<String> extractTextFromImage({
     required String base64Image,
     required AiProvider provider,
+    CancelToken? cancelToken,
   }) async {
     final client = ApiClient(baseUrl: provider.baseUrl);
     try {
@@ -184,9 +205,124 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         client.setAuthToken(provider.apiKey);
       }
 
+      final requestBody = _buildVisionRequest(
+        provider: provider,
+        base64Image: base64Image,
+      );
+
+      final endpoint = _chatEndpoint(provider);
+
       final response = await client.post<Map<String, dynamic>>(
-        '/chat/completions',
-        data: {
+        endpoint,
+        data: requestBody,
+        cancelToken: cancelToken,
+      );
+
+      final data = response.data;
+      if (data == null) throw const AppFailure.translation(message: 'Empty response from vision API');
+      return _parseChatResponse(data, provider);
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.cancel) {
+        throw const AppFailure.translation(message: 'Image extraction cancelled');
+      }
+      _logger.e('Vision API error: ${e.message}');
+      throw mapDioException(e);
+    } on AppFailure {
+      rethrow;
+    } catch (e) {
+      _logger.e('Vision error: $e');
+      throw AppFailure.translation(message: 'Image text extraction failed: $e');
+    } finally {
+      client.dispose();
+    }
+  }
+
+  // ── Provider-specific API routing ─────────────────────────────
+
+  /// Returns the correct chat completion endpoint for the provider.
+  String _chatEndpoint(AiProvider provider) {
+    switch (provider.type) {
+      case ProviderType.gemini:
+        // Google's OpenAI-compatible endpoint
+        return '/v1beta/openai/chat/completions';
+      case ProviderType.claude:
+        // Anthropic Messages API (different from OpenAI format)
+        return '/messages';
+      default:
+        // OpenAI-compatible providers (OpenAI, DeepSeek, OpenRouter,
+        // Ollama, LM Studio, and all custom providers)
+        return '/chat/completions';
+    }
+  }
+
+  /// Build the request body, adapting to provider-specific API formats.
+  Map<String, dynamic> _buildChatRequest({
+    required AiProvider provider,
+    required String systemPrompt,
+    required String userContent,
+    required bool stream,
+  }) {
+    switch (provider.type) {
+      case ProviderType.claude:
+        // Anthropic Messages API format
+        return {
+          'model': provider.selectedModel,
+          'max_tokens': 4096,
+          'system': systemPrompt,
+          'messages': [
+            {'role': 'user', 'content': userContent},
+          ],
+          'stream': stream,
+        };
+      default:
+        // OpenAI-compatible format (works for OpenAI, Gemini via /v1beta/openai,
+        // DeepSeek, OpenRouter, Ollama, LM Studio, and all custom providers)
+        return {
+          'model': provider.selectedModel,
+          'messages': [
+            {'role': 'system', 'content': systemPrompt},
+            {'role': 'user', 'content': userContent},
+          ],
+          'temperature': 0.3,
+          'stream': stream,
+        };
+    }
+  }
+
+  /// Build a vision/OCR request body.
+  Map<String, dynamic> _buildVisionRequest({
+    required AiProvider provider,
+    required String base64Image,
+  }) {
+    switch (provider.type) {
+      case ProviderType.claude:
+        return {
+          'model': provider.selectedModel,
+          'max_tokens': 4096,
+          'messages': [
+            {
+              'role': 'user',
+              'content': [
+                {
+                  'type': 'image',
+                  'source': {
+                    'type': 'base64',
+                    'media_type': 'image/jpeg',
+                    'data': base64Image,
+                  },
+                },
+                {
+                  'type': 'text',
+                  'text': 'Extract all text from this image. '
+                      'Return ONLY the extracted text, preserving the original layout and formatting. '
+                      'Do not add any commentary or explanation.',
+                },
+              ],
+            },
+          ],
+        };
+      default:
+        return {
           'model': provider.selectedModel,
           'messages': [
             {
@@ -209,23 +345,34 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           ],
           'temperature': 0.1,
           'max_tokens': 4096,
-        },
-      );
-
-      final data = response.data;
-      if (data == null) throw const AppFailure.translation(message: 'Empty response from vision API');
-      final choices = data['choices'] as List?;
-      if (choices == null || choices.isEmpty) throw const AppFailure.translation(message: 'No choices in vision response');
-      return choices[0]['message']['content'] as String;
-    } on DioException catch (e) {
-      _logger.e('Vision API error: ${e.message}');
-      throw mapDioException(e);
-    } catch (e) {
-      _logger.e('Vision error: $e');
-      throw AppFailure.translation(message: 'Image text extraction failed: $e');
-    } finally {
-      client.dispose();
+        };
     }
+  }
+
+  /// Parse the chat response, handling provider-specific response formats.
+  String _parseChatResponse(Map<String, dynamic> data, AiProvider provider) {
+    if (provider.type == ProviderType.claude) {
+      // Anthropic Messages API response: { "content": [{"type": "text", "text": "..."}] }
+      final content = data['content'] as List?;
+      if (content == null || content.isEmpty) {
+        throw const AppFailure.translation(message: 'Empty response from Claude');
+      }
+      final textParts = content
+          .where((c) => c is Map && c['type'] == 'text')
+          .map((c) => c['text'] as String)
+          .toList();
+      if (textParts.isEmpty) {
+        throw const AppFailure.translation(message: 'No text content in Claude response');
+      }
+      return textParts.join('\n');
+    }
+
+    // OpenAI-compatible response: { "choices": [{"message": {"content": "..."}}] }
+    final choices = data['choices'] as List?;
+    if (choices == null || choices.isEmpty) {
+      throw const AppFailure.translation(message: 'No choices in response');
+    }
+    return choices[0]['message']['content'] as String;
   }
 
   String _buildSystemPrompt({

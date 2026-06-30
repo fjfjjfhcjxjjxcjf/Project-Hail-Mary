@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:dio/dio.dart';
 import '../../domain/entities/translation_job.dart';
 import '../../domain/entities/ai_provider.dart';
 import '../../domain/entities/glossary.dart';
@@ -18,6 +19,7 @@ class TranslationRepository {
     String customPrompt = '',
     List<GlossaryEntry> glossary = const [],
     String previousContext = '',
+    CancelToken? cancelToken,
   }) {
     return _dataSource.translateChunk(
       text: text,
@@ -28,6 +30,7 @@ class TranslationRepository {
       customPrompt: customPrompt,
       glossary: glossary,
       previousContext: previousContext,
+      cancelToken: cancelToken,
     );
   }
 
@@ -38,6 +41,7 @@ class TranslationRepository {
     required TranslationProfile profile,
     required AiProvider provider,
     String customPrompt = '',
+    CancelToken? cancelToken,
   }) {
     return _dataSource.translateChunkStream(
       text: text,
@@ -46,16 +50,19 @@ class TranslationRepository {
       profile: profile,
       provider: provider,
       customPrompt: customPrompt,
+      cancelToken: cancelToken,
     );
   }
 
   Future<String> extractTextFromImage({
     required String base64Image,
     required AiProvider provider,
+    CancelToken? cancelToken,
   }) {
     return _dataSource.extractTextFromImage(
       base64Image: base64Image,
       provider: provider,
+      cancelToken: cancelToken,
     );
   }
 

@@ -69,10 +69,47 @@ class LocalStorageService {
   AppSettings getSettings() {
     final Map<String, dynamic> data = {};
     for (final key in _settings.keys) {
-      data[key.toString()] = _settings.get(key);
+      final raw = _settings.get(key);
+      data[key.toString()] = _coerceSettingValue(key.toString(), raw);
     }
     if (data.isEmpty) return const AppSettings();
     return AppSettings.fromJson(data);
+  }
+
+  /// Coerce string values stored in Hive back to their proper JSON types.
+  /// Hive Box<String> stores everything as String, but fromJson expects
+  /// int, double, bool, List, etc. This prevents the
+  /// "type 'String' is not a subtype of type 'num?'" crash on restart.
+  static dynamic _coerceSettingValue(String key, String? value) {
+    if (value == null) return null;
+
+    // Known int fields
+    const intKeys = {'chunkSize'};
+    // Known double fields
+    const doubleKeys = {'temperature'};
+    // Known bool fields
+    const boolKeys = {'offlineMode', 'autoSave', 'backgroundTranslation', 'notifications'};
+    // Known list fields
+    const listKeys = {'providerPriority'};
+
+    if (intKeys.contains(key)) {
+      return int.tryParse(value) ?? 0;
+    }
+    if (doubleKeys.contains(key)) {
+      return double.tryParse(value) ?? 0.0;
+    }
+    if (boolKeys.contains(key)) {
+      return value.toLowerCase() == 'true';
+    }
+    if (listKeys.contains(key)) {
+      // Stored as "[a, b, c]" via toString() on List<String>
+      if (value == '[]') return <String>[];
+      final inner = value.substring(1, value.length - 1);
+      if (inner.trim().isEmpty) return <String>[];
+      return inner.split(',').map((e) => e.trim()).toList();
+    }
+
+    return value; // String fields pass through as-is
   }
 
   Future<void> saveSettings(AppSettings settings) async {

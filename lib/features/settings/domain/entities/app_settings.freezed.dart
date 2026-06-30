@@ -32,6 +32,8 @@ mixin _$AppSettings {
   bool get backgroundTranslation => throw _privateConstructorUsedError;
   bool get notifications => throw _privateConstructorUsedError;
   String get defaultExportFormat => throw _privateConstructorUsedError;
+  String get sourceLanguage => throw _privateConstructorUsedError;
+  String get targetLanguage => throw _privateConstructorUsedError;
 
   /// Serializes this AppSettings to a JSON map.
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
@@ -62,6 +64,8 @@ abstract class $AppSettingsCopyWith<$Res> {
     bool backgroundTranslation,
     bool notifications,
     String defaultExportFormat,
+    String sourceLanguage,
+    String targetLanguage,
   });
 }
 
@@ -91,6 +95,8 @@ class _$AppSettingsCopyWithImpl<$Res, $Val extends AppSettings>
     Object? backgroundTranslation = null,
     Object? notifications = null,
     Object? defaultExportFormat = null,
+    Object? sourceLanguage = null,
+    Object? targetLanguage = null,
   }) {
     return _then(
       _value.copyWith(
@@ -138,6 +144,14 @@ class _$AppSettingsCopyWithImpl<$Res, $Val extends AppSettings>
                 ? _value.defaultExportFormat
                 : defaultExportFormat // ignore: cast_nullable_to_non_nullable
                       as String,
+            sourceLanguage: null == sourceLanguage
+                ? _value.sourceLanguage
+                : sourceLanguage // ignore: cast_nullable_to_non_nullable
+                      as String,
+            targetLanguage: null == targetLanguage
+                ? _value.targetLanguage
+                : targetLanguage // ignore: cast_nullable_to_non_nullable
+                      as String,
           )
           as $Val,
     );
@@ -165,6 +179,8 @@ abstract class _$$AppSettingsImplCopyWith<$Res>
     bool backgroundTranslation,
     bool notifications,
     String defaultExportFormat,
+    String sourceLanguage,
+    String targetLanguage,
   });
 }
 
@@ -193,6 +209,8 @@ class __$$AppSettingsImplCopyWithImpl<$Res>
     Object? backgroundTranslation = null,
     Object? notifications = null,
     Object? defaultExportFormat = null,
+    Object? sourceLanguage = null,
+    Object? targetLanguage = null,
   }) {
     return _then(
       _$AppSettingsImpl(
@@ -240,6 +258,14 @@ class __$$AppSettingsImplCopyWithImpl<$Res>
             ? _value.defaultExportFormat
             : defaultExportFormat // ignore: cast_nullable_to_non_nullable
                   as String,
+        sourceLanguage: null == sourceLanguage
+            ? _value.sourceLanguage
+            : sourceLanguage // ignore: cast_nullable_to_non_nullable
+                  as String,
+        targetLanguage: null == targetLanguage
+            ? _value.targetLanguage
+            : targetLanguage // ignore: cast_nullable_to_non_nullable
+                  as String,
       ),
     );
   }
@@ -260,6 +286,8 @@ class _$AppSettingsImpl implements _AppSettings {
     this.backgroundTranslation = true,
     this.notifications = true,
     this.defaultExportFormat = 'pdf',
+    this.sourceLanguage = 'auto',
+    this.targetLanguage = 'fa',
   }) : _providerPriority = providerPriority;
 
   factory _$AppSettingsImpl.fromJson(Map<String, dynamic> json) =>
@@ -305,10 +333,16 @@ class _$AppSettingsImpl implements _AppSettings {
   @override
   @JsonKey()
   final String defaultExportFormat;
+  @override
+  @JsonKey()
+  final String sourceLanguage;
+  @override
+  @JsonKey()
+  final String targetLanguage;
 
   @override
   String toString() {
-    return 'AppSettings(themeMode: $themeMode, locale: $locale, translationProfile: $translationProfile, chunkSize: $chunkSize, temperature: $temperature, providerPriority: $providerPriority, offlineMode: $offlineMode, autoSave: $autoSave, backgroundTranslation: $backgroundTranslation, notifications: $notifications, defaultExportFormat: $defaultExportFormat)';
+    return 'AppSettings(themeMode: $themeMode, locale: $locale, translationProfile: $translationProfile, chunkSize: $chunkSize, temperature: $temperature, providerPriority: $providerPriority, offlineMode: $offlineMode, autoSave: $autoSave, backgroundTranslation: $backgroundTranslation, notifications: $notifications, defaultExportFormat: $defaultExportFormat, sourceLanguage: $sourceLanguage, targetLanguage: $targetLanguage)';
   }
 
   @override
@@ -338,7 +372,11 @@ class _$AppSettingsImpl implements _AppSettings {
             (identical(other.notifications, notifications) ||
                 other.notifications == notifications) &&
             (identical(other.defaultExportFormat, defaultExportFormat) ||
-                other.defaultExportFormat == defaultExportFormat));
+                other.defaultExportFormat == defaultExportFormat) &&
+            (identical(other.sourceLanguage, sourceLanguage) ||
+                other.sourceLanguage == sourceLanguage) &&
+            (identical(other.targetLanguage, targetLanguage) ||
+                other.targetLanguage == targetLanguage));
   }
 
   @JsonKey(includeFromJson: false, includeToJson: false)
@@ -356,6 +394,8 @@ class _$AppSettingsImpl implements _AppSettings {
     backgroundTranslation,
     notifications,
     defaultExportFormat,
+    sourceLanguage,
+    targetLanguage,
   );
 
   /// Create a copy of AppSettings
@@ -385,6 +425,8 @@ abstract class _AppSettings implements AppSettings {
     final bool backgroundTranslation,
     final bool notifications,
     final String defaultExportFormat,
+    final String sourceLanguage,
+    final String targetLanguage,
   }) = _$AppSettingsImpl;
 
   factory _AppSettings.fromJson(Map<String, dynamic> json) =
@@ -412,6 +454,10 @@ abstract class _AppSettings implements AppSettings {
   bool get notifications;
   @override
   String get defaultExportFormat;
+  @override
+  String get sourceLanguage;
+  @override
+  String get targetLanguage;
 
   /// Create a copy of AppSettings
   /// with the given fields replaced by the non-null parameter values.
