@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../../core/data/languages.dart';
+import '../../../../core/debug/debug_log.dart';
 import '../../../../core/widgets/language_picker.dart';
 import '../../../settings/presentation/providers/settings_provider.dart';
 import '../../domain/entities/translation_job.dart';
@@ -27,6 +28,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
   bool _initializedFromSettings = false;
   bool _loadingFile = false;
   String? _loadedFileName;
+  bool _showDebugLog = true;
 
   final _sourceTextController = TextEditingController();
 
@@ -196,6 +198,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
 
     final isTranslating = job?.status == TranslationStatus.inProgress;
     final isFailed = job?.status == TranslationStatus.failed;
+    final isCancelled = job?.status == TranslationStatus.cancelled;
 
     final translatedText = job?.status == TranslationStatus.completed
         ? ref.read(translationJobProvider.notifier).getTranslatedText()
@@ -210,6 +213,11 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
       appBar: AppBar(
         title: const Text('Translate'),
         actions: [
+          IconButton(
+            icon: Icon(_showDebugLog ? Icons.bug_report : Icons.bug_report_outlined),
+            tooltip: 'Toggle Debug Log',
+            onPressed: () => setState(() => _showDebugLog = !_showDebugLog),
+          ),
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
@@ -351,6 +359,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
             ),
           // Source text
           Expanded(
+            flex: _showDebugLog ? 2 : 3,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: TextField(
@@ -366,21 +375,22 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           // Translated text / error display
           Expanded(
+            flex: _showDebugLog ? 2 : 3,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: isFailed
+                  color: isFailed || isCancelled
                       ? colorScheme.errorContainer
                       : colorScheme.surfaceContainerLow,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isFailed ? colorScheme.error : colorScheme.outlineVariant,
+                    color: isFailed || isCancelled ? colorScheme.error : colorScheme.outlineVariant,
                   ),
                 ),
                 child: Stack(
@@ -390,6 +400,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                         translatedText: translatedText,
                         isTranslating: isTranslating,
                         isFailed: isFailed,
+                        isCancelled: isCancelled,
                         errorMessage: job?.errorMessage,
                         colorScheme: colorScheme,
                       ),
@@ -421,6 +432,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
                   child: isTranslating
                       ? FilledButton.icon(
                           onPressed: () {
+                            dlog('UI', 'Cancel button pressed');
                             ref.read(translationJobProvider.notifier).cancel();
                           },
                           icon: const Icon(Icons.stop),
@@ -459,6 +471,9 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
               ],
             ),
           ),
+          // Debug log panel
+          if (_showDebugLog)
+            _DebugLogPanel(colorScheme: colorScheme),
         ],
       ),
     );
@@ -468,6 +483,7 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
     required String translatedText,
     required bool isTranslating,
     required bool isFailed,
+    required bool isCancelled,
     String? errorMessage,
     required ColorScheme colorScheme,
   }) {
@@ -497,6 +513,31 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
       );
     }
 
+    if (isCancelled) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.cancel_outlined, color: colorScheme.error, size: 18),
+              const SizedBox(width: 8),
+              Text(
+                'Translation Cancelled',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: colorScheme.onErrorContainer,
+                ),
+              ),
+            ],
+          ),
+          if (translatedText.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(translatedText),
+          ],
+        ],
+      );
+    }
+
     if (translatedText.isEmpty && isTranslating) {
       return Text(
         'Translating...',
@@ -515,16 +556,22 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
   }
 
   void _translate() {
+    dlog('UI', '=== TRANSLATE BUTTON PRESSED ===');
     final text = _sourceTextController.text.trim();
     if (text.isEmpty) {
+      dlog('UI', 'ABORT: empty text');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter text to translate')),
       );
       return;
     }
+    dlog('UI', 'text length: ${text.length}');
 
     final activeProviders = ref.read(activeProvidersProvider);
+    dlog('UI', 'active providers: ${activeProviders.length}');
+
     if (activeProviders.isEmpty) {
+      dlog('UI', 'ABORT: no providers');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: const Text('No AI provider configured'),
@@ -543,8 +590,12 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
       selectedProvider = activeProviders.where((p) => p.id == _selectedProviderId).firstOrNull;
     }
     selectedProvider ??= activeProviders.first;
+    dlog('UI', 'selected provider: ${selectedProvider.name} (${selectedProvider.type.name})');
+    dlog('UI', '  model: ${selectedProvider.selectedModel}');
+    dlog('UI', '  apiKey empty: ${selectedProvider.apiKey.isEmpty}');
 
     if (selectedProvider.selectedModel.isEmpty) {
+      dlog('UI', 'ABORT: no model selected');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${selectedProvider.name} has no model selected. Configure in Providers.'),
@@ -556,6 +607,10 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
       );
       return;
     }
+
+    dlog('UI', 'calling startTranslation...');
+    dlog('UI', '  source: $_sourceLanguage, target: $_targetLanguage');
+    dlog('UI', '  profile: ${_selectedProfile.name}');
 
     _persistLanguages();
 
@@ -569,6 +624,8 @@ class _TranslationScreenState extends ConsumerState<TranslationScreen> {
           providerId: _selectedProviderId,
           chunkSize: 2000,
         );
+
+    dlog('UI', 'startTranslation() fired (not awaited)');
   }
 
   void _showRecentJobs(BuildContext context, List<TranslationJob> jobs) {
@@ -624,6 +681,110 @@ class _LanguageChip extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Debug log panel that displays the last N log messages from DebugLog.
+/// Toggle with the bug icon in the app bar.
+class _DebugLogPanel extends StatefulWidget {
+  final ColorScheme colorScheme;
+  const _DebugLogPanel({required this.colorScheme});
+
+  @override
+  State<_DebugLogPanel> createState() => _DebugLogPanelState();
+}
+
+class _DebugLogPanelState extends State<_DebugLogPanel> {
+  final _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    DebugLog.instance.notifier.addListener(_onNewLog);
+  }
+
+  @override
+  void dispose() {
+    DebugLog.instance.notifier.removeListener(_onNewLog);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onNewLog() {
+    if (mounted) setState(() {});
+    // Auto-scroll to bottom
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final lines = DebugLog.instance.lines;
+    return Container(
+      height: 180,
+      margin: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: widget.colorScheme.outline.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF2D2D2D),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.bug_report, size: 14, color: Colors.amber),
+                const SizedBox(width: 6),
+                Text('Debug Log (${lines.length})',
+                    style: const TextStyle(fontSize: 11, color: Colors.amber, fontWeight: FontWeight.w600)),
+                const Spacer(),
+                InkWell(
+                  onTap: () {
+                    DebugLog.instance.clear();
+                    setState(() {});
+                  },
+                  child: const Text('Clear', style: TextStyle(fontSize: 10, color: Colors.white54)),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              itemCount: lines.length,
+              itemBuilder: (ctx, i) {
+                final line = lines[i];
+                Color textColor = Colors.white70;
+                if (line.contains('ERROR') || line.contains('FAIL') || line.contains('!!!')) {
+                  textColor = Colors.redAccent;
+                } else if (line.contains('SUCCESS') || line.contains('COMPLETED')) {
+                  textColor = Colors.greenAccent;
+                } else if (line.contains('CANCEL')) {
+                  textColor = Colors.orangeAccent;
+                } else if (line.contains('>>>') || line.contains('<<<')) {
+                  textColor = Colors.cyanAccent;
+                }
+                return Text(
+                  line,
+                  style: TextStyle(fontSize: 9, fontFamily: 'monospace', color: textColor),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

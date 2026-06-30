@@ -3,6 +3,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:logger/logger.dart';
 import 'package:uuid/uuid.dart';
+import '../../../../core/debug/debug_log.dart';
 import '../../../../core/errors/app_failure.dart';
 import '../../../../core/storage/local_storage_service.dart';
 import '../../../../core/providers/storage_provider.dart';
@@ -41,20 +42,35 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
     int chunkSize = 2000,
     double temperature = 0.3,
   }) async {
+    dlog('JOB', '=== startTranslation() called ===');
+    dlog('JOB', '  text length: ${text.length}');
+    dlog('JOB', '  source: $sourceLanguage, target: $targetLanguage');
+    dlog('JOB', '  profile: ${profile.name}');
+    dlog('JOB', '  providerId param: $providerId');
+
     _cancelled = false;
     _cancelToken = CancelToken();
+    dlog('JOB', '  CancelToken created: ${_cancelToken.hashCode}');
 
     // Read active providers on-demand (not watched) to avoid
     // provider recreation mid-translation.
     final activeProviders = _ref.read(activeProvidersProvider);
+    dlog('JOB', '  active providers: ${activeProviders.length}');
+    for (final p in activeProviders) {
+      dlog('JOB', '    - ${p.id}: ${p.name} (${p.type.name}), '
+          'model=${p.selectedModel}, keyLen=${p.apiKey.length}');
+    }
 
     // Pick provider
     AiProvider? provider;
     if (providerId != null) {
       provider = activeProviders.where((p) => p.id == providerId).firstOrNull;
+      dlog('JOB', '  picked by id "$providerId": ${provider?.name ?? "NOT FOUND"}');
     }
     provider ??= activeProviders.isNotEmpty ? activeProviders.first : null;
+
     if (provider == null) {
+      dlog('JOB', '  FAIL: no provider available');
       state = TranslationJob(
         id: _uuid.v4(),
         documentId: '',
@@ -69,8 +85,17 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
       return;
     }
 
+    dlog('JOB', '  USING provider: ${provider.name} (${provider.type.name})');
+    dlog('JOB', '  baseUrl: ${provider.baseUrl}');
+    dlog('JOB', '  model: ${provider.selectedModel}');
+
     // Chunk the text
     final chunks = _repository.chunkText(text, chunkSize);
+    dlog('JOB', '  chunks: ${chunks.length}');
+    for (int i = 0; i < chunks.length; i++) {
+      dlog('JOB', '    chunk[$i]: ${chunks[i].length} chars');
+    }
+
     final translatedChunks = <TranslatedChunk>[
       for (int i = 0; i < chunks.length; i++)
         TranslatedChunk(id: _uuid.v4(), index: i, originalText: chunks[i]),
@@ -91,8 +116,14 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
       useGlossary: glossary.isNotEmpty,
     );
 
+    dlog('JOB', '  job created, id: ${job.id}');
+    dlog('JOB', '  setting state to inProgress...');
+
     state = job;
+    dlog('JOB', '  state set. Saving to storage...');
+
     await _storage.saveJob(job);
+    dlog('JOB', '  job saved. Starting chunk loop...');
 
     _logger.i('Translation started: ${chunks.length} chunk(s), '
         'provider=${provider.name}, model=${provider.selectedModel}, '
@@ -101,8 +132,10 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
     // Translate chunks sequentially
     String previousContext = '';
     for (int i = 0; i < chunks.length; i++) {
+      dlog('JOB', '--- chunk ${i + 1}/${chunks.length} ---');
+
       if (_cancelled) {
-        _logger.i('Translation cancelled before chunk ${i + 1}/${chunks.length}');
+        dlog('JOB', '  CANCELLED before chunk ${i + 1}');
         final cancelled = job.copyWith(
           status: TranslationStatus.cancelled,
           chunks: state!.chunks,
@@ -118,10 +151,11 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
         chunks: progressChunks,
         progress: i / chunks.length,
       );
+      dlog('JOB', '  state updated, progress: ${(i / chunks.length * 100).toStringAsFixed(0)}%');
 
       try {
-        _logger.d('Translating chunk ${i + 1}/${chunks.length} '
-            '(${chunks[i].length} chars)');
+        dlog('JOB', '  calling _repository.translateChunk...');
+        dlog('JOB', '  cancelToken attached: ${_cancelToken != null}');
 
         final translated = await _repository.translateChunk(
           text: chunks[i],
@@ -135,8 +169,10 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
           cancelToken: _cancelToken,
         );
 
+        dlog('JOB', '  translateChunk returned: ${translated.length} chars');
+
         if (_cancelled) {
-          _logger.i('Translation cancelled after chunk ${i + 1}/${chunks.length}');
+          dlog('JOB', '  CANCELLED after chunk ${i + 1}');
           final cancelled = job.copyWith(
             status: TranslationStatus.cancelled,
             chunks: state!.chunks,
@@ -160,15 +196,17 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
         state = updated;
         await _storage.saveJob(updated);
 
-        _logger.d('Chunk ${i + 1}/${chunks.length} complete '
-            '(${translated.length} chars translated)');
+        dlog('JOB', '  chunk ${i + 1} complete. progress: ${(progress * 100).toStringAsFixed(0)}%');
 
         previousContext = translated;
       } catch (e, stackTrace) {
-        // Extract the real, human-readable error message.
-        // AppFailure variants all carry a `message` field; for DioException
-        // the statusCode and endpoint are useful context.
         final errorMsg = _extractErrorMessage(e);
+
+        dlog('JOB', '  *** EXCEPTION on chunk ${i + 1} ***');
+        dlog('JOB', '  type: ${e.runtimeType}');
+        dlog('JOB', '  message: $errorMsg');
+        dlog('JOB', '  toString: ${e.toString()}');
+        dlog('JOB', '  stackTrace: ${stackTrace.toString().split('\n').take(5).join(' | ')}');
 
         _logger.e(
           'Translation FAILED on chunk ${i + 1}/${chunks.length}: $errorMsg',
@@ -176,9 +214,9 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
           stackTrace: stackTrace,
         );
 
+        dlog('JOB', '  transitioning state to FAILED...');
+
         // Transition UI to Failed state with the real error message.
-        // This MUST happen in a try/catch so a storage write failure
-        // doesn't mask the original translation error.
         try {
           final updatedChunks = List<TranslatedChunk>.from(state!.chunks);
           updatedChunks[i] = updatedChunks[i].copyWith(
@@ -190,21 +228,24 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
             errorMessage: 'Chunk ${i + 1} failed: $errorMsg',
           );
           state = updated;
+          dlog('JOB', '  state set to FAILED: $errorMsg');
           await _storage.saveJob(updated);
+          dlog('JOB', '  failed state saved to storage');
         } catch (saveError) {
-          // Storage write failed — at minimum update the in-memory state
-          // so the UI doesn't stay stuck in Loading.
+          dlog('JOB', '  saveJob ALSO FAILED: $saveError');
           _logger.e('Failed to persist error state: $saveError');
           state = job.copyWith(
             status: TranslationStatus.failed,
             errorMessage: 'Chunk ${i + 1} failed: $errorMsg',
           );
+          dlog('JOB', '  state set to FAILED (in-memory only)');
         }
         return;
       }
     }
 
     // Completed
+    dlog('JOB', '=== Translation COMPLETED ===');
     _logger.i('Translation completed: ${chunks.length} chunk(s)');
     final completed = job.copyWith(
       chunks: state!.chunks,
@@ -214,18 +255,19 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
     );
     state = completed;
     await _storage.saveJob(completed);
+    dlog('JOB', '  completed state saved');
   }
 
   /// Cancel the running translation.
-  /// Immediately cancels the in-flight HTTP request via CancelToken,
-  /// and sets a flag to prevent any subsequent chunk processing.
   void cancel() {
-    _logger.i('Translation cancel requested');
+    dlog('JOB', 'cancel() called, _cancelled=$_cancelled');
+    dlog('JOB', '  _cancelToken: ${_cancelToken?.hashCode}');
+    dlog('JOB', '  _cancelToken.isCancelled: ${_cancelToken?.isCancelled}');
     _cancelled = true;
     _cancelToken?.cancel('Translation cancelled by user');
+    dlog('JOB', '  cancelToken.cancel() called');
   }
 
-  /// Get the full translated text.
   String getTranslatedText() {
     if (state == null) return '';
     return state!.chunks
@@ -234,11 +276,8 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
         .join('\n\n');
   }
 
-  /// Extract a clean, human-readable error message from any exception type.
-  /// Preserves the real error — never replaces it with a generic string.
   static String _extractErrorMessage(Object error) {
     if (error is AppFailure) {
-      // Freezed union: use when() to extract the message from every variant.
       return error.when(
         server: (message, statusCode) =>
             statusCode != null ? '$message (HTTP $statusCode)' : message,
@@ -267,6 +306,7 @@ class TranslationJobNotifier extends StateNotifier<TranslationJob?> {
 
   @override
   void dispose() {
+    dlog('JOB', 'TranslationJobNotifier.dispose()');
     _cancelToken?.cancel('Provider disposed');
     super.dispose();
   }
@@ -277,10 +317,6 @@ final translationJobProvider =
   final storage = ref.watch(localStorageServiceProvider);
   final dataSource = TranslationDataSourceImpl();
   final repository = TranslationRepository(dataSource);
-  // NOTE: We pass `ref` and READ activeProvidersProvider inside
-  // startTranslation() instead of WATCHing it here. This prevents
-  // the notifier from being destroyed and recreated when providers
-  // change, which would orphan an in-progress translation.
   return TranslationJobNotifier(repository, storage, ref);
 });
 

@@ -6,6 +6,7 @@ import '../../domain/entities/glossary.dart';
 import '../../../../core/errors/app_failure.dart';
 import '../../../../core/errors/error_handler.dart';
 import '../../../../core/network/api_client.dart';
+import '../../../../core/debug/debug_log.dart';
 
 abstract class TranslationDataSource {
   Future<String> translateChunk({
@@ -50,7 +51,15 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     String previousContext = '',
     CancelToken? cancelToken,
   }) async {
+    dlog('DS', 'translateChunk called');
+    dlog('DS', '  provider: ${provider.name} (${provider.type.name})');
+    dlog('DS', '  baseUrl: ${provider.baseUrl}');
+    dlog('DS', '  model: ${provider.selectedModel}');
+    dlog('DS', '  apiKey empty: ${provider.apiKey.isEmpty}');
+    dlog('DS', '  cancelToken: ${cancelToken != null ? "attached" : "NONE"}');
+
     if (provider.selectedModel.isEmpty) {
+      dlog('DS', '  ABORT: no model selected');
       throw const AppFailure.translation(
         message: 'No model selected. Please select a model in Provider settings.',
       );
@@ -60,6 +69,9 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     try {
       if (provider.apiKey.isNotEmpty) {
         client.setAuthToken(provider.apiKey);
+        dlog('DS', '  auth token set (length: ${provider.apiKey.length})');
+      } else {
+        dlog('DS', '  WARNING: no API key');
       }
 
       final systemPrompt = _buildSystemPrompt(
@@ -69,6 +81,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         customPrompt: customPrompt,
         glossary: glossary,
       );
+      dlog('DS', '  system prompt: ${systemPrompt.length} chars');
 
       final userContent = previousContext.isNotEmpty
           ? 'Previous context for continuity:\n$previousContext\n\n---\n\nText to translate:\n$text'
@@ -82,6 +95,9 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       );
 
       final endpoint = _chatEndpoint(provider);
+      dlog('DS', '  endpoint: $endpoint');
+      dlog('DS', '  full URL: ${provider.baseUrl}$endpoint');
+      dlog('DS', '  sending request...');
 
       final response = await client.post<Map<String, dynamic>>(
         endpoint,
@@ -89,21 +105,40 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         cancelToken: cancelToken,
       );
 
+      dlog('DS', '  response received, status: ${response.statusCode}');
+
       final data = response.data;
-      if (data == null) throw const AppFailure.translation(message: 'Empty response');
-      return _parseChatResponse(data, provider);
+      if (data == null) {
+        dlog('DS', '  FAIL: empty response data');
+        throw const AppFailure.translation(message: 'Empty response');
+      }
+
+      final result = _parseChatResponse(data, provider);
+      dlog('DS', '  SUCCESS: ${result.length} chars translated');
+      return result;
     } on DioException catch (e) {
+      dlog('DS', '  DioException: ${e.type.name}');
+      dlog('DS', '    message: ${e.message}');
+      dlog('DS', '    statusCode: ${e.response?.statusCode}');
+      if (e.response?.data != null) {
+        dlog('DS', '    response: ${e.response!.data.toString().substring(0, e.response!.data.toString().length.clamp(0, 500))}');
+      }
       if (e.type == DioExceptionType.cancel) {
+        dlog('DS', '  -> throwing: Translation cancelled');
         throw const AppFailure.translation(message: 'Translation cancelled');
       }
-      _logger.e('Translation API error: ${e.message}');
-      throw mapDioException(e);
-    } on AppFailure {
+      final mapped = mapDioException(e);
+      dlog('DS', '  -> throwing: $mapped');
+      throw mapped;
+    } on AppFailure catch (e) {
+      dlog('DS', '  AppFailure: $e');
       rethrow;
-    } catch (e) {
-      _logger.e('Translation error: $e');
+    } catch (e, st) {
+      dlog('DS', '  UNEXPECTED ERROR: $e');
+      dlog('DS', '  stackTrace: $st');
       throw AppFailure.translation(message: e.toString());
     } finally {
+      dlog('DS', '  disposing client');
       client.dispose();
     }
   }
@@ -118,6 +153,11 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     String customPrompt = '',
     CancelToken? cancelToken,
   }) async* {
+    dlog('DS-STREAM', 'translateChunkStream called');
+    dlog('DS-STREAM', '  provider: ${provider.name} (${provider.type.name})');
+    dlog('DS-STREAM', '  model: ${provider.selectedModel}');
+    dlog('DS-STREAM', '  baseUrl: ${provider.baseUrl}');
+
     if (provider.selectedModel.isEmpty) {
       throw const AppFailure.translation(
         message: 'No model selected. Please select a model in Provider settings.',
@@ -145,6 +185,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       );
 
       final endpoint = _chatEndpoint(provider);
+      dlog('DS-STREAM', '  endpoint: $endpoint, stream: true');
 
       final response = await client.dio.post<ResponseBody>(
         endpoint,
@@ -153,8 +194,13 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         cancelToken: cancelToken,
       );
 
+      dlog('DS-STREAM', '  stream response received: ${response.statusCode}');
+
       final stream = response.data?.stream;
-      if (stream == null) return;
+      if (stream == null) {
+        dlog('DS-STREAM', '  stream is null');
+        return;
+      }
 
       String buffer = '';
       await for (final chunk in stream) {
@@ -176,14 +222,15 @@ class TranslationDataSourceImpl implements TranslationDataSource {
                 yield content;
               }
             } catch (e) {
-              // Log but do not abort the stream — a single malformed SSE
-              // chunk should not kill the entire translation.
               _logger.w('Failed to parse SSE chunk: $e\n  line: $line');
+              dlog('DS-STREAM', '  SSE parse error: $e');
             }
           }
         }
       }
+      dlog('DS-STREAM', '  stream completed');
     } on DioException catch (e) {
+      dlog('DS-STREAM', '  DioException: ${e.type.name} ${e.message}');
       if (e.type == DioExceptionType.cancel) {
         throw const AppFailure.translation(message: 'Translation cancelled');
       }
@@ -199,6 +246,9 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     required AiProvider provider,
     CancelToken? cancelToken,
   }) async {
+    dlog('DS-OCR', 'extractTextFromImage called');
+    dlog('DS-OCR', '  provider: ${provider.name}, model: ${provider.selectedModel}');
+
     final client = ApiClient(baseUrl: provider.baseUrl);
     try {
       if (provider.apiKey.isNotEmpty) {
@@ -211,6 +261,7 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       );
 
       final endpoint = _chatEndpoint(provider);
+      dlog('DS-OCR', '  endpoint: $endpoint');
 
       final response = await client.post<Map<String, dynamic>>(
         endpoint,
@@ -218,10 +269,13 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         cancelToken: cancelToken,
       );
 
+      dlog('DS-OCR', '  response: ${response.statusCode}');
+
       final data = response.data;
       if (data == null) throw const AppFailure.translation(message: 'Empty response from vision API');
       return _parseChatResponse(data, provider);
     } on DioException catch (e) {
+      dlog('DS-OCR', '  DioException: ${e.type.name}');
       if (e.type == DioExceptionType.cancel) {
         throw const AppFailure.translation(message: 'Image extraction cancelled');
       }
@@ -239,23 +293,17 @@ class TranslationDataSourceImpl implements TranslationDataSource {
 
   // ── Provider-specific API routing ─────────────────────────────
 
-  /// Returns the correct chat completion endpoint for the provider.
   String _chatEndpoint(AiProvider provider) {
     switch (provider.type) {
       case ProviderType.gemini:
-        // Google's OpenAI-compatible endpoint
         return '/v1beta/openai/chat/completions';
       case ProviderType.claude:
-        // Anthropic Messages API (different from OpenAI format)
         return '/messages';
       default:
-        // OpenAI-compatible providers (OpenAI, DeepSeek, OpenRouter,
-        // Ollama, LM Studio, and all custom providers)
         return '/chat/completions';
     }
   }
 
-  /// Build the request body, adapting to provider-specific API formats.
   Map<String, dynamic> _buildChatRequest({
     required AiProvider provider,
     required String systemPrompt,
@@ -264,7 +312,6 @@ class TranslationDataSourceImpl implements TranslationDataSource {
   }) {
     switch (provider.type) {
       case ProviderType.claude:
-        // Anthropic Messages API format
         return {
           'model': provider.selectedModel,
           'max_tokens': 4096,
@@ -275,8 +322,6 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           'stream': stream,
         };
       default:
-        // OpenAI-compatible format (works for OpenAI, Gemini via /v1beta/openai,
-        // DeepSeek, OpenRouter, Ollama, LM Studio, and all custom providers)
         return {
           'model': provider.selectedModel,
           'messages': [
@@ -289,7 +334,6 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     }
   }
 
-  /// Build a vision/OCR request body.
   Map<String, dynamic> _buildVisionRequest({
     required AiProvider provider,
     required String base64Image,
@@ -349,10 +393,10 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     }
   }
 
-  /// Parse the chat response, handling provider-specific response formats.
   String _parseChatResponse(Map<String, dynamic> data, AiProvider provider) {
+    dlog('DS', '  parsing response (type: ${provider.type.name})');
+
     if (provider.type == ProviderType.claude) {
-      // Anthropic Messages API response: { "content": [{"type": "text", "text": "..."}] }
       final content = data['content'] as List?;
       if (content == null || content.isEmpty) {
         throw const AppFailure.translation(message: 'Empty response from Claude');
@@ -367,12 +411,14 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       return textParts.join('\n');
     }
 
-    // OpenAI-compatible response: { "choices": [{"message": {"content": "..."}}] }
     final choices = data['choices'] as List?;
     if (choices == null || choices.isEmpty) {
+      dlog('DS', '  FAIL: no choices in response. Keys: ${data.keys.toList()}');
       throw const AppFailure.translation(message: 'No choices in response');
     }
-    return choices[0]['message']['content'] as String;
+    final messageContent = choices[0]['message']['content'] as String;
+    dlog('DS', '  parsed OK: ${messageContent.length} chars');
+    return messageContent;
   }
 
   String _buildSystemPrompt({
