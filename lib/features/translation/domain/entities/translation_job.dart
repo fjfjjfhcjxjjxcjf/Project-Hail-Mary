@@ -52,6 +52,7 @@ enum TranslationProfile {
 
 @freezed
 class TranslationJob with _$TranslationJob {
+  @JsonSerializable(explicitToJson: true)
   const factory TranslationJob({
     required String id,
     required String documentId,

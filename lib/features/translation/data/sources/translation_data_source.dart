@@ -97,12 +97,18 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       final endpoint = _chatEndpoint(provider);
       dlog('DS', '  endpoint: $endpoint');
       dlog('DS', '  full URL: ${provider.baseUrl}$endpoint');
-      dlog('DS', '  sending request...');
+      dlog('DS', '  sending request (auth via Options header)...');
 
       final response = await client.post<Map<String, dynamic>>(
         endpoint,
         data: requestBody,
         cancelToken: cancelToken,
+        options: Options(
+          headers: {
+            if (provider.apiKey.isNotEmpty)
+              'Authorization': 'Bearer ${provider.apiKey}',
+          },
+        ),
       );
 
       dlog('DS', '  response received, status: ${response.statusCode}');
@@ -190,7 +196,13 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       final response = await client.dio.post<ResponseBody>(
         endpoint,
         data: requestBody,
-        options: Options(responseType: ResponseType.stream),
+        options: Options(
+          responseType: ResponseType.stream,
+          headers: {
+            if (provider.apiKey.isNotEmpty)
+              'Authorization': 'Bearer ${provider.apiKey}',
+          },
+        ),
         cancelToken: cancelToken,
       );
 
@@ -267,6 +279,12 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         endpoint,
         data: requestBody,
         cancelToken: cancelToken,
+        options: Options(
+          headers: {
+            if (provider.apiKey.isNotEmpty)
+              'Authorization': 'Bearer ${provider.apiKey}',
+          },
+        ),
       );
 
       dlog('DS-OCR', '  response: ${response.statusCode}');

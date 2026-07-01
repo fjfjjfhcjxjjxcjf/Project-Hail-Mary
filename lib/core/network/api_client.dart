@@ -63,8 +63,8 @@ class ApiClient {
     return _dio.get<T>(path, queryParameters: queryParams, cancelToken: cancelToken);
   }
 
-  Future<Response<T>> post<T>(String path, {dynamic data, CancelToken? cancelToken}) {
-    return _dio.post<T>(path, data: data, cancelToken: cancelToken);
+  Future<Response<T>> post<T>(String path, {dynamic data, CancelToken? cancelToken, Options? options}) {
+    return _dio.post<T>(path, data: data, cancelToken: cancelToken, options: options);
   }
 
   void dispose() {

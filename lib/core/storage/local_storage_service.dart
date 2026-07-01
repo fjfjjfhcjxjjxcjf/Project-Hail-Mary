@@ -162,7 +162,16 @@ class LocalStorageService {
   }
 
   Future<void> saveJob(TranslationJob job) async {
-    await _jobs.put(job.id, job.toJson());
+    final json = job.toJson();
+    // Explicitly serialize nested Freezed objects — toJson() may leave
+    // them as raw instances that Hive cannot write.
+    if (json['chunks'] is List) {
+      json['chunks'] = (json['chunks'] as List).map((e) {
+        if (e is TranslatedChunk) return e.toJson();
+        return e;
+      }).toList();
+    }
+    await _jobs.put(job.id, json);
   }
 
   Future<void> deleteJob(String id) async {
