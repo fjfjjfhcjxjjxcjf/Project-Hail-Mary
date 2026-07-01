@@ -256,6 +256,10 @@ class _ProviderCard extends ConsumerWidget {
         return Icons.diamond;
       case ProviderType.openrouter:
         return Icons.hub;
+      case ProviderType.naraRouter:
+        return Icons.router;
+      case ProviderType.googleAI:
+        return Icons.cloud;
       case ProviderType.deepseek:
         return Icons.psychology;
       case ProviderType.claude:
