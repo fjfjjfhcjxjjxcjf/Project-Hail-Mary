@@ -138,8 +138,18 @@ class ProvidersNotifier extends StateNotifier<List<AiProvider>> {
         _storage.saveProvider(p);
       }
     } else {
+      // Merge: add any NEW default providers that don't exist in saved list.
+      final savedIds = saved.map((p) => p.id).toSet();
+      final missingDefaults = _defaultProviders.where((d) => !savedIds.contains(d.id)).toList();
+
+      final merged = [...saved];
+      for (final p in missingDefaults) {
+        merged.add(p);
+        _storage.saveProvider(p);
+      }
+
       // Ensure every provider has a selectedModel if it has models available
-      state = saved.map((p) {
+      state = merged.map((p) {
         if (p.selectedModel.isEmpty && p.models.isNotEmpty) {
           final fixed = p.copyWith(selectedModel: p.models.first);
           _storage.saveProvider(fixed);
