@@ -10,6 +10,19 @@ import '../../features/project/domain/entities/project.dart';
 import '../plugins/plugin_manifest.dart';
 
 class LocalStorageService {
+  /// Deep-convert a Map<dynamic, dynamic> (from Hive) to Map<String, dynamic>
+  /// so that generated fromJson() methods don't crash on type casts.
+  static Map<String, dynamic> _asJsonMap(Map raw) {
+    return raw.map((k, v) => MapEntry(k.toString(), _deepConvert(v)));
+  }
+
+  /// Recursively convert Hive's dynamic values to JSON-compatible types.
+  static dynamic _deepConvert(dynamic v) {
+    if (v is Map) return v.map((k, val) => MapEntry(k.toString(), _deepConvert(val)));
+    if (v is List) return v.map(_deepConvert).toList();
+    return v; // primitives pass through
+  }
+
   static const _providersBox = 'providers';
   static const _settingsBox = 'settings';
   static const _glossariesBox = 'glossaries';
@@ -46,14 +59,14 @@ class LocalStorageService {
 
   List<AiProvider> getProviders() {
     return _providers.values
-        .map((json) => AiProvider.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => AiProvider.fromJson(_asJsonMap(json)))
         .toList();
   }
 
   AiProvider? getProvider(String id) {
     final json = _providers.get(id);
     if (json == null) return null;
-    return AiProvider.fromJson(Map<String, dynamic>.from(json));
+    return AiProvider.fromJson(_asJsonMap(json));
   }
 
   Future<void> saveProvider(AiProvider provider) async {
@@ -129,14 +142,14 @@ class LocalStorageService {
 
   List<Glossary> getGlossaries() {
     return _glossaries.values
-        .map((json) => Glossary.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => Glossary.fromJson(_asJsonMap(json)))
         .toList();
   }
 
   Glossary? getGlossary(String id) {
     final json = _glossaries.get(id);
     if (json == null) return null;
-    return Glossary.fromJson(Map<String, dynamic>.from(json));
+    return Glossary.fromJson(_asJsonMap(json));
   }
 
   Future<void> saveGlossary(Glossary glossary) async {
@@ -151,14 +164,14 @@ class LocalStorageService {
 
   List<TranslationJob> getJobs() {
     return _jobs.values
-        .map((json) => TranslationJob.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => TranslationJob.fromJson(_asJsonMap(json)))
         .toList();
   }
 
   TranslationJob? getJob(String id) {
     final json = _jobs.get(id);
     if (json == null) return null;
-    return TranslationJob.fromJson(Map<String, dynamic>.from(json));
+    return TranslationJob.fromJson(_asJsonMap(json));
   }
 
   Future<void> saveJob(TranslationJob job) async {
@@ -182,14 +195,14 @@ class LocalStorageService {
 
   List<Document> getDocuments() {
     return _documents.values
-        .map((json) => Document.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => Document.fromJson(_asJsonMap(json)))
         .toList();
   }
 
   Document? getDocument(String id) {
     final json = _documents.get(id);
     if (json == null) return null;
-    return Document.fromJson(Map<String, dynamic>.from(json));
+    return Document.fromJson(_asJsonMap(json));
   }
 
   Future<void> saveDocument(Document doc) async {
@@ -204,14 +217,14 @@ class LocalStorageService {
 
   List<TranslationProject> getProjects() {
     return _projects.values
-        .map((json) => TranslationProject.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => TranslationProject.fromJson(_asJsonMap(json)))
         .toList();
   }
 
   TranslationProject? getProject(String id) {
     final json = _projects.get(id);
     if (json == null) return null;
-    return TranslationProject.fromJson(Map<String, dynamic>.from(json));
+    return TranslationProject.fromJson(_asJsonMap(json));
   }
 
   Future<void> saveProject(TranslationProject project) async {
@@ -226,7 +239,7 @@ class LocalStorageService {
 
   List<TranslationMemory> getTranslationMemories() {
     return _memories.values
-        .map((json) => TranslationMemory.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => TranslationMemory.fromJson(_asJsonMap(json)))
         .toList();
   }
 
@@ -242,7 +255,7 @@ class LocalStorageService {
 
   List<PromptTemplate> getPromptTemplates() {
     return _prompts.values
-        .map((json) => PromptTemplate.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => PromptTemplate.fromJson(_asJsonMap(json)))
         .toList();
   }
 
@@ -258,7 +271,7 @@ class LocalStorageService {
 
   List<PluginManifest> getPlugins() {
     return _plugins.values
-        .map((json) => PluginManifest.fromJson(Map<String, dynamic>.from(json)))
+        .map((json) => PluginManifest.fromJson(_asJsonMap(json)))
         .toList();
   }
 

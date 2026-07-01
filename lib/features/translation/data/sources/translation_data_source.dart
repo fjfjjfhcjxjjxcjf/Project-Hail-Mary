@@ -5,7 +5,6 @@ import '../../domain/entities/translation_job.dart';
 import '../../domain/entities/glossary.dart';
 import '../../../../core/errors/app_failure.dart';
 import '../../../../core/errors/error_handler.dart';
-import '../../../../core/network/api_client.dart';
 import '../../../../core/debug/debug_log.dart';
 
 abstract class TranslationDataSource {
@@ -39,6 +38,26 @@ abstract class TranslationDataSource {
 class TranslationDataSourceImpl implements TranslationDataSource {
   final Logger _logger = Logger(printer: PrettyPrinter(methodCount: 0));
 
+  /// Create a clean Dio instance with auth baked into BaseOptions.
+  /// No interceptors, no retry, no interference — just headers in BaseOptions.
+  Dio _createClient(AiProvider provider) {
+    final apiKey = provider.apiKey.trim();
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      if (apiKey.isNotEmpty) 'Authorization': 'Bearer $apiKey',
+    };
+    dlog('DS', '  _createClient: baseUrl=${provider.baseUrl}');
+    dlog('DS', '  _createClient: apiKey ${apiKey.isEmpty ? "EMPTY" : "set (${apiKey.length} chars)"}');
+    dlog('DS', '  _createClient: headers=$headers');
+
+    return Dio(BaseOptions(
+      baseUrl: provider.baseUrl,
+      connectTimeout: const Duration(seconds: 30),
+      receiveTimeout: const Duration(minutes: 5),
+      headers: headers,
+    ));
+  }
+
   @override
   Future<String> translateChunk({
     required String text,
@@ -65,15 +84,8 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       );
     }
 
-    final client = ApiClient(baseUrl: provider.baseUrl);
+    final dio = _createClient(provider);
     try {
-      if (provider.apiKey.isNotEmpty) {
-        client.setAuthToken(provider.apiKey);
-        dlog('DS', '  auth token set (length: ${provider.apiKey.length})');
-      } else {
-        dlog('DS', '  WARNING: no API key');
-      }
-
       final systemPrompt = _buildSystemPrompt(
         profile: profile,
         sourceLanguage: sourceLanguage,
@@ -97,18 +109,15 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       final endpoint = _chatEndpoint(provider);
       dlog('DS', '  endpoint: $endpoint');
       dlog('DS', '  full URL: ${provider.baseUrl}$endpoint');
-      dlog('DS', '  sending request (auth via Options header)...');
+      dlog('DS', '  sending POST...');
 
-      final response = await client.post<Map<String, dynamic>>(
+      // Log what Dio will actually send
+      dlog('DS', '  BaseOptions.headers: ${dio.options.headers}');
+
+      final response = await dio.post<Map<String, dynamic>>(
         endpoint,
         data: requestBody,
         cancelToken: cancelToken,
-        options: Options(
-          headers: {
-            if (provider.apiKey.isNotEmpty)
-              'Authorization': 'Bearer ${provider.apiKey}',
-          },
-        ),
       );
 
       dlog('DS', '  response received, status: ${response.statusCode}');
@@ -129,6 +138,11 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       if (e.response?.data != null) {
         dlog('DS', '    response: ${e.response!.data.toString().substring(0, e.response!.data.toString().length.clamp(0, 500))}');
       }
+      // Log ACTUAL sent headers from the failed request
+      dlog('DS', '    sent headers:');
+      e.requestOptions.headers.forEach((k, v) {
+        dlog('DS', '      $k = ${k == "Authorization" ? "Bearer [REDACTED]" : v}');
+      });
       if (e.type == DioExceptionType.cancel) {
         dlog('DS', '  -> throwing: Translation cancelled');
         throw const AppFailure.translation(message: 'Translation cancelled');
@@ -144,8 +158,8 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       dlog('DS', '  stackTrace: $st');
       throw AppFailure.translation(message: e.toString());
     } finally {
-      dlog('DS', '  disposing client');
-      client.dispose();
+      dlog('DS', '  disposing dio');
+      dio.close();
     }
   }
 
@@ -160,9 +174,6 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     CancelToken? cancelToken,
   }) async* {
     dlog('DS-STREAM', 'translateChunkStream called');
-    dlog('DS-STREAM', '  provider: ${provider.name} (${provider.type.name})');
-    dlog('DS-STREAM', '  model: ${provider.selectedModel}');
-    dlog('DS-STREAM', '  baseUrl: ${provider.baseUrl}');
 
     if (provider.selectedModel.isEmpty) {
       throw const AppFailure.translation(
@@ -170,12 +181,8 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       );
     }
 
-    final client = ApiClient(baseUrl: provider.baseUrl);
+    final dio = _createClient(provider);
     try {
-      if (provider.apiKey.isNotEmpty) {
-        client.setAuthToken(provider.apiKey);
-      }
-
       final systemPrompt = _buildSystemPrompt(
         profile: profile,
         sourceLanguage: sourceLanguage,
@@ -193,26 +200,17 @@ class TranslationDataSourceImpl implements TranslationDataSource {
       final endpoint = _chatEndpoint(provider);
       dlog('DS-STREAM', '  endpoint: $endpoint, stream: true');
 
-      final response = await client.dio.post<ResponseBody>(
+      final response = await dio.post<ResponseBody>(
         endpoint,
         data: requestBody,
-        options: Options(
-          responseType: ResponseType.stream,
-          headers: {
-            if (provider.apiKey.isNotEmpty)
-              'Authorization': 'Bearer ${provider.apiKey}',
-          },
-        ),
+        options: Options(responseType: ResponseType.stream),
         cancelToken: cancelToken,
       );
 
-      dlog('DS-STREAM', '  stream response received: ${response.statusCode}');
+      dlog('DS-STREAM', '  stream response: ${response.statusCode}');
 
       final stream = response.data?.stream;
-      if (stream == null) {
-        dlog('DS-STREAM', '  stream is null');
-        return;
-      }
+      if (stream == null) return;
 
       String buffer = '';
       await for (final chunk in stream) {
@@ -240,15 +238,13 @@ class TranslationDataSourceImpl implements TranslationDataSource {
           }
         }
       }
-      dlog('DS-STREAM', '  stream completed');
     } on DioException catch (e) {
-      dlog('DS-STREAM', '  DioException: ${e.type.name} ${e.message}');
       if (e.type == DioExceptionType.cancel) {
         throw const AppFailure.translation(message: 'Translation cancelled');
       }
       throw mapDioException(e);
     } finally {
-      client.dispose();
+      dio.close();
     }
   }
 
@@ -259,53 +255,41 @@ class TranslationDataSourceImpl implements TranslationDataSource {
     CancelToken? cancelToken,
   }) async {
     dlog('DS-OCR', 'extractTextFromImage called');
-    dlog('DS-OCR', '  provider: ${provider.name}, model: ${provider.selectedModel}');
 
-    final client = ApiClient(baseUrl: provider.baseUrl);
+    if (provider.selectedModel.isEmpty) {
+      throw const AppFailure.translation(
+        message: 'No model selected. Please select a model in Provider settings.',
+      );
+    }
+
+    final dio = _createClient(provider);
     try {
-      if (provider.apiKey.isNotEmpty) {
-        client.setAuthToken(provider.apiKey);
-      }
-
       final requestBody = _buildVisionRequest(
         provider: provider,
         base64Image: base64Image,
       );
 
       final endpoint = _chatEndpoint(provider);
-      dlog('DS-OCR', '  endpoint: $endpoint');
-
-      final response = await client.post<Map<String, dynamic>>(
+      final response = await dio.post<Map<String, dynamic>>(
         endpoint,
         data: requestBody,
         cancelToken: cancelToken,
-        options: Options(
-          headers: {
-            if (provider.apiKey.isNotEmpty)
-              'Authorization': 'Bearer ${provider.apiKey}',
-          },
-        ),
       );
-
-      dlog('DS-OCR', '  response: ${response.statusCode}');
 
       final data = response.data;
       if (data == null) throw const AppFailure.translation(message: 'Empty response from vision API');
       return _parseChatResponse(data, provider);
     } on DioException catch (e) {
-      dlog('DS-OCR', '  DioException: ${e.type.name}');
       if (e.type == DioExceptionType.cancel) {
         throw const AppFailure.translation(message: 'Image extraction cancelled');
       }
-      _logger.e('Vision API error: ${e.message}');
       throw mapDioException(e);
     } on AppFailure {
       rethrow;
     } catch (e) {
-      _logger.e('Vision error: $e');
       throw AppFailure.translation(message: 'Image text extraction failed: $e');
     } finally {
-      client.dispose();
+      dio.close();
     }
   }
 
