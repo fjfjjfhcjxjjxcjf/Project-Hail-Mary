@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:doclingo/features/translation/data/repositories/translation_repository.dart';
 import 'package:doclingo/features/translation/data/sources/translation_data_source.dart';
-import 'package:doclingo/features/translation/domain/entities/translation_job.dart';
 
 void main() {
   group('TranslationRepository.chunkText', () {
