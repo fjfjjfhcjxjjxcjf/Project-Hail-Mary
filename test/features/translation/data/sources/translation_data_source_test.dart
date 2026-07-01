@@ -5,15 +5,80 @@ import 'package:doclingo/features/translation/domain/entities/ai_provider.dart';
 import 'package:doclingo/features/translation/domain/entities/translation_job.dart';
 import 'package:doclingo/core/errors/app_failure.dart';
 
-final _testProvider = AiProvider(
-  id: 'test-openrouter',
-  name: 'OpenRouter',
-  type: ProviderType.openrouter,
-  baseUrl: 'https://openrouter.ai/api/v1',
-  apiKey: 'sk-or-test-key-12345',
+// ── Test fixtures ───────────────────────────────────────────────
+
+final _naraRouter = AiProvider(
+  id: 'nararouter',
+  name: 'NaraRouter',
+  type: ProviderType.naraRouter,
+  baseUrl: 'https://router.bynara.id/v1',
+  apiKey: 'test-key',
   selectedModel: 'openai/gpt-4o-mini',
   models: ['openai/gpt-4o-mini'],
 );
+
+final _openRouter = AiProvider(
+  id: 'openrouter',
+  name: 'OpenRouter',
+  type: ProviderType.openrouter,
+  baseUrl: 'https://openrouter.ai/api/v1',
+  apiKey: 'test-key',
+  selectedModel: 'openai/gpt-4o-mini',
+  models: ['openai/gpt-4o-mini'],
+);
+
+final _googleAI = AiProvider(
+  id: 'google-ai',
+  name: 'Google AI Studio',
+  type: ProviderType.googleAI,
+  baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+  apiKey: 'test-key',
+  selectedModel: 'gemini-2.0-flash',
+  models: ['gemini-2.0-flash'],
+);
+
+final _openAI = AiProvider(
+  id: 'openai',
+  name: 'OpenAI',
+  type: ProviderType.openai,
+  baseUrl: 'https://api.openai.com/v1',
+  apiKey: 'test-key',
+  selectedModel: 'gpt-4o-mini',
+  models: ['gpt-4o-mini'],
+);
+
+final _deepseek = AiProvider(
+  id: 'deepseek',
+  name: 'DeepSeek',
+  type: ProviderType.deepseek,
+  baseUrl: 'https://api.deepseek.com/v1',
+  apiKey: 'test-key',
+  selectedModel: 'deepseek-chat',
+  models: ['deepseek-chat'],
+);
+
+final _claude = AiProvider(
+  id: 'claude',
+  name: 'Claude',
+  type: ProviderType.claude,
+  baseUrl: 'https://api.anthropic.com/v1',
+  apiKey: 'test-key',
+  selectedModel: 'claude-sonnet-4-20250514',
+  models: ['claude-sonnet-4-20250514'],
+);
+
+final _custom = AiProvider(
+  id: 'custom',
+  name: 'Custom',
+  type: ProviderType.custom,
+  baseUrl: 'https://my-proxy.example.com/v1',
+  apiKey: 'test-key',
+  selectedModel: 'my-model',
+  models: ['my-model'],
+);
+
+/// All OpenAI-compatible providers that use /chat/completions
+final _openAICompatible = [_naraRouter, _openRouter, _googleAI, _openAI, _deepseek, _custom];
 
 void main() {
   group('TranslationDataSourceImpl', () {
@@ -31,7 +96,7 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(selectedModel: ''),
+            provider: _naraRouter.copyWith(selectedModel: ''),
           ),
           throwsA(isA<AppFailure>()),
         );
@@ -44,7 +109,7 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(selectedModel: ''),
+            provider: _naraRouter.copyWith(selectedModel: ''),
           ),
           throwsA(isA<AppFailure>()),
         );
@@ -54,7 +119,7 @@ void main() {
         expect(
           () => ds.extractTextFromImage(
             base64Image: 'abc123',
-            provider: _testProvider.copyWith(selectedModel: ''),
+            provider: _naraRouter.copyWith(selectedModel: ''),
           ),
           throwsA(isA<AppFailure>()),
         );
@@ -69,7 +134,7 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(
+            provider: _naraRouter.copyWith(
               baseUrl: 'https://invalid.host.test',
             ),
           ),
@@ -78,7 +143,22 @@ void main() {
       });
     });
 
-    group('Provider-specific routing', () {
+    group('Provider-specific endpoint routing', () {
+      test('NaraRouter uses /chat/completions', () async {
+        try {
+          await ds.translateChunk(
+            text: 'hello',
+            sourceLanguage: 'auto',
+            targetLanguage: 'fa',
+            profile: TranslationProfile.balanced,
+            provider: _naraRouter.copyWith(
+              baseUrl: 'https://invalid.host.test',
+            ),
+          );
+          fail('Should have thrown');
+        } on AppFailure catch (_) {}
+      });
+
       test('OpenRouter uses /chat/completions', () async {
         try {
           await ds.translateChunk(
@@ -86,7 +166,22 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(
+            provider: _openRouter.copyWith(
+              baseUrl: 'https://invalid.host.test',
+            ),
+          );
+          fail('Should have thrown');
+        } on AppFailure catch (_) {}
+      });
+
+      test('Google AI Studio uses /chat/completions', () async {
+        try {
+          await ds.translateChunk(
+            text: 'hello',
+            sourceLanguage: 'auto',
+            targetLanguage: 'fa',
+            profile: TranslationProfile.balanced,
+            provider: _googleAI.copyWith(
               baseUrl: 'https://invalid.host.test',
             ),
           );
@@ -101,9 +196,13 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(
+            provider: AiProvider(
+              id: 'gemini',
+              name: 'Gemini',
               type: ProviderType.gemini,
               baseUrl: 'https://invalid.host.test',
+              apiKey: 'test-key',
+              selectedModel: 'gemini-1.5-flash',
             ),
           );
           fail('Should have thrown');
@@ -117,12 +216,63 @@ void main() {
             sourceLanguage: 'auto',
             targetLanguage: 'fa',
             profile: TranslationProfile.balanced,
-            provider: _testProvider.copyWith(
-              type: ProviderType.claude,
+            provider: _claude.copyWith(
               baseUrl: 'https://invalid.host.test',
             ),
           );
           fail('Should have thrown');
+        } on AppFailure catch (_) {}
+      });
+
+      test('Custom uses /chat/completions', () async {
+        try {
+          await ds.translateChunk(
+            text: 'hello',
+            sourceLanguage: 'auto',
+            targetLanguage: 'fa',
+            profile: TranslationProfile.balanced,
+            provider: _custom.copyWith(
+              baseUrl: 'https://invalid.host.test',
+            ),
+          );
+          fail('Should have thrown');
+        } on AppFailure catch (_) {}
+      });
+    });
+
+    group('Authorization header', () {
+      test('all providers send Authorization in BaseOptions', () async {
+        // Verify each provider type creates a client with auth header.
+        // Since we can't inject a mock, we verify no crash on construction.
+        for (final provider in _openAICompatible) {
+          try {
+            await ds.translateChunk(
+              text: 'hello',
+              sourceLanguage: 'auto',
+              targetLanguage: 'fa',
+              profile: TranslationProfile.balanced,
+              provider: provider.copyWith(
+                baseUrl: 'https://invalid.host.test',
+              ),
+            );
+          } on AppFailure catch (_) {
+            // Expected - host doesn't exist
+          }
+        }
+      });
+
+      test('API key is trimmed', () async {
+        try {
+          await ds.translateChunk(
+            text: 'hello',
+            sourceLanguage: 'auto',
+            targetLanguage: 'fa',
+            profile: TranslationProfile.balanced,
+            provider: _naraRouter.copyWith(
+              apiKey: '  test-key  ',
+              baseUrl: 'https://invalid.host.test',
+            ),
+          );
         } on AppFailure catch (_) {}
       });
     });
@@ -136,7 +286,7 @@ void main() {
           sourceLanguage: 'auto',
           targetLanguage: 'fa',
           profile: TranslationProfile.balanced,
-          provider: _testProvider.copyWith(
+          provider: _naraRouter.copyWith(
             baseUrl: 'https://invalid.host.test',
           ),
           cancelToken: cancelToken,

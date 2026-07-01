@@ -5,7 +5,7 @@ part 'ai_provider.g.dart';
 
 enum ProviderType {
   openai, gemini, openrouter, deepseek, claude,
-  ollama, lmStudio, custom;
+  ollama, lmStudio, naraRouter, googleAI, custom;
 }
 
 @freezed

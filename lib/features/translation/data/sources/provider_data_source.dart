@@ -25,11 +25,15 @@ class ProviderDataSourceImpl implements ProviderDataSource {
         case ProviderType.gemini:
           endpoint = '/v1beta/models';
           break;
+        case ProviderType.googleAI:
+          endpoint = '/models';
+          break;
         case ProviderType.ollama:
         case ProviderType.lmStudio:
           endpoint = '/api/tags';
           break;
         default:
+          // OpenAI, OpenRouter, NaraRouter, DeepSeek, Custom, etc.
           endpoint = '/models';
       }
 

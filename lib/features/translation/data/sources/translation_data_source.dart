@@ -301,7 +301,11 @@ class TranslationDataSourceImpl implements TranslationDataSource {
         return '/v1beta/openai/chat/completions';
       case ProviderType.claude:
         return '/messages';
+      case ProviderType.googleAI:
+        // Google AI Studio uses OpenAI-compatible endpoint
+        return '/chat/completions';
       default:
+        // OpenAI, OpenRouter, NaraRouter, DeepSeek, Custom, etc.
         return '/chat/completions';
     }
   }
